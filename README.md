@@ -1,6 +1,34 @@
+---
+license: mit
+language:
+  - en
+  - fr
+tags:
+  - continuous-thought-engine
+  - cognitive-agent
+  - mixture-of-experts
+  - kuramoto
+  - self-modifying
+  - progressive-growth
+  - decentralized-ai
+  - personal-ai
+library_name: pytorch
+pipeline_tag: text-generation
+models:
+  - thefinalboss/fractus-cte
+sdk: docker
+app_port: 7860
+---
+
 # Fractus CTE
 
 **A living AI that thinks continuously, remembers forever, and grows on its own.**
+
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Python](https://img.shields.io/badge/python-3.13-green)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.9-orange)
+![Params](https://img.shields.io/badge/params-1.05B-red)
+![Status](https://img.shields.io/badge/status-active-brightgreen)
 
 ---
 
