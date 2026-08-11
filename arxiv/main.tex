@@ -1,0 +1,82 @@
+% Fractus White Paper v2.0 — arXiv LaTeX source
+% Compile: pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
+%
+% To submit to arXiv:
+% 1. Create account at arxiv.org
+% 2. Upload main.tex + any figures
+% 3. Select: cs.AI (Artificial Intelligence) + cs.LG (Machine Learning)
+% 4. Title: "Fractus: A Continuous Thought Engine with Multi-Block Depth, Self-Modification, and Progressive Growth"
+% 5. Abstract: copy from the \begin{abstract} below
+% 6. Authors: Philippe-Antoine Robert (rpa.tu@proton.me)
+
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    urlcolor=blue!70!black,
+    citecolor=blue!70!black,
+}
+
+\title{\textbf{Fractus: A Continuous Thought Engine with Multi-Block Depth, \\
+       Self-Modification, and Progressive Growth}}
+\author{Philippe-Antoine Robert\\
+        \texttt{rpa.tu@proton.me}}
+\date{August 6, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+I present Fractus v2.0 --- a continuous cognitive agent architecture that departs fundamentally from the transformer paradigm. Unlike static models that map input to output in a single forward pass, Fractus is a dynamical system that maintains a persistent thought state, advances it tick by tick through a multi-block residual stack, and emits output only when it has something confident to say. This version introduces three structural advances: (1) multi-block depth with per-block continuous attention state, (2) progressive growth via zero-padding inheritance, and (3) runtime self-modification. Training optimizations (sparse low-rank MoE, head-partial training, gradient accumulation) achieve 707 tokens/second on a consumer CPU. I also report negative results: Expert Decoupled Training and the Forward-Forward algorithm were both tested and refuted. All code is open-source (MIT).
+\end{abstract}
+
+\section{Introduction}
+Contemporary LLMs are static, stateless, generic, and centralized. Fractus challenges each: the Continuous Thought Engine (CTE) is dynamical, the Persistent Memory gives cross-session recall, the PhaseRoutedMoE enables specialization, and progressive growth enables consumer-hardware training.
+
+\section{Architecture}
+
+\subsection{The Continuous Thought Engine}
+The CTE stacks $N$ blocks. Each block owns its attention state $(S, z)$, Kuramoto phases, and PhaseRoutedMoE. The thought $h$ flows through the stack as a residual stream.
+
+\subsection{PhaseRoutedMoE}
+Routing via von Mises gate on Farey-distributed expert phases. Sparse gather-first dispatch (top-$k$). Low-rank experts: $W = \text{scale} \cdot U V^\top$ (rank 64).
+
+\subsection{Progressive Growth}
+Grow palier by palier (width + depth + experts). Zero-pad old weights. Warm start converges faster.
+
+\section{Training}
+Online training: 32 tokens/chunk, 1 backward/chunk, detached state carry. Combined optimizations: tied head, head-partial, sparse MoE, gradient accumulation, Kuramoto detachment. Measured: 707 tok/s on CPU.
+
+\section{Negative Results}
+\subsection{EDT --- Refuted}
+5 variants tested on 13M CTE. All $\sim$19\% worse than from-scratch. Root cause: objective misalignment + routing concentration.
+\subsection{Forward-Forward --- Refuted}
+Goodness signal $\neq$ CE. NLL increased from 124 to 221.
+
+\section{Results}
+Progressive growth: 4 paliers (6.6M $\to$ 350M) on CPU in 4h44m. Self-modification validated (50\% traffic, stable loss). Cross-session memory verified.
+
+\section{Conclusion}
+Fractus v2.0 demonstrates that a continuous, multi-block, self-modifying cognitive agent can be trained on consumer hardware. The architecture is validated by 28 tests and measured benchmarks.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{8}
+\bibitem{katharopoulos2020} Katharopoulos et al. (2020). Transformers are RNNs. ICML.
+\bibitem{siren} Sitzmann et al. (2020). Implicit Neural Representations with SIREN. NeurIPS.
+\bibitem{hinton2022} Hinton, G. (2022). The Forward-Forward Algorithm.
+\bibitem{kuramoto} Kuramoto, Y. (1984). Chemical Oscillations, Waves, and Turbulence.
+\bibitem{lora} Hu et al. (2021). LoRA: Low-Rank Adaptation. arXiv.
+\end{thebibliography}
+
+\end{document}
