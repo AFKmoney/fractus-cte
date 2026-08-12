@@ -241,6 +241,7 @@ def main():
             vocab_size=50257,
             d_model=cfg["d_model"], n_heads=cfg["n_heads"],
             d_head=cfg.get("d_head", 64), n_levels=2,
+            n_layers=cfg.get("n_layers", 1),
             n_oscillators=8, coupling_rank=4,
             n_experts=cfg["n_experts"], top_k=2,
             expert_d_ff=cfg["expert_d_ff"],

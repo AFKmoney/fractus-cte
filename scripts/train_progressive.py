@@ -30,13 +30,14 @@ CORPUS = os.environ.get("FRACTUS_CORPUS", CORPUS)
 
 # The growth ladder. Each palier is bigger than the last.
 # d_model grows ~2x, n_heads keeps d_head=64, experts grow, rank grows.
+# DEPTH grows too — so the GPU 1B grow inherits many warm blocks, not 1.
 PALIERS = [
-    # (d_model, n_heads, n_experts, siren_rank, expert_d_ff, tokens, lr)
-    dict(d_model=128,  n_heads=2,  n_experts=4,   siren_rank=32, expert_d_ff=128,  tokens=2_000_000, lr=1e-3),
-    dict(d_model=256,  n_heads=4,  n_experts=8,   siren_rank=32, expert_d_ff=256,  tokens=1_500_000, lr=5e-4),
-    dict(d_model=512,  n_heads=8,  n_experts=16,  siren_rank=64, expert_d_ff=512,  tokens=1_000_000, lr=3e-4),
-    dict(d_model=768,  n_heads=12, n_experts=32,  siren_rank=64, expert_d_ff=768,  tokens=500_000,   lr=2e-4),
-    dict(d_model=1280, n_heads=20, n_experts=128, siren_rank=64, expert_d_ff=2048, tokens=0,         lr=1e-4),  # GPU only
+    # (d_model, n_heads, n_layers, n_experts, siren_rank, expert_d_ff, tokens, lr)
+    dict(d_model=128,  n_heads=2,  n_layers=2,  n_experts=4,   siren_rank=32, expert_d_ff=128,  tokens=2_000_000, lr=1e-3),
+    dict(d_model=256,  n_heads=4,  n_layers=4,  n_experts=8,   siren_rank=32, expert_d_ff=256,  tokens=1_500_000, lr=5e-4),
+    dict(d_model=512,  n_heads=8,  n_layers=8,  n_experts=16,  siren_rank=64, expert_d_ff=512,  tokens=1_000_000, lr=3e-4),
+    dict(d_model=768,  n_heads=12, n_layers=12, n_experts=32,  siren_rank=64, expert_d_ff=768,  tokens=500_000,   lr=2e-4),
+    dict(d_model=1280, n_heads=20, n_layers=16, n_experts=128, siren_rank=64, expert_d_ff=2048, tokens=0,         lr=1e-4),  # GPU only
 ]
 
 
@@ -167,6 +168,7 @@ def main():
                 d_model=prev_config.get("d_model", 128),
                 n_heads=prev_config.get("n_heads", 2),
                 d_head=prev_config.get("d_head", 64),
+                n_layers=prev_config.get("n_layers", 1),
                 n_levels=2, n_oscillators=8, coupling_rank=4,
                 n_experts=prev_config.get("n_experts", 4),
                 top_k=2,
@@ -188,17 +190,21 @@ def main():
             engine = ContinuousThoughtEngine(
                 vocab_size=50257, d_model=config["d_model"],
                 n_heads=config["n_heads"], d_head=64, n_levels=2,
+                n_layers=config["n_layers"],
                 n_oscillators=8, coupling_rank=4,
                 n_experts=config["n_experts"], top_k=2,
                 expert_d_ff=config["expert_d_ff"],
                 siren_rank=config["siren_rank"])
-        elif engine.d_model < config["d_model"] or engine.blocks[0].moe.n_experts < config["n_experts"]:
+        elif (engine.d_model < config["d_model"]
+              or engine.blocks[0].moe.n_experts < config["n_experts"]
+              or len(engine.blocks) < config["n_layers"]):
             # Grow from previous palier (in-memory or just-loaded checkpoint).
             print(f"\n--- Growing to {palier_name} ---", flush=True)
             grow_config = dict(
                 d_model=config["d_model"],
                 n_heads=config["n_heads"],
                 d_head=64,
+                n_layers=config["n_layers"],
                 n_experts=config["n_experts"],
                 siren_rank=config["siren_rank"],
                 expert_d_ff=config["expert_d_ff"],
@@ -231,6 +237,7 @@ def main():
             "model_state": engine.state_dict(),
             "config": {
                 "d_model": engine.d_model,
+                "n_layers": len(engine.blocks),
                 "n_experts": engine.blocks[0].moe.n_experts,
                 "siren_rank": engine.blocks[0].moe.expert_rank,
                 "expert_d_ff": engine.blocks[0].moe.d_ff,
