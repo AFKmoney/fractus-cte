@@ -66,75 +66,15 @@ snapshot_download(
 print('Datasets downloaded')
 "
 
-# 5. Build combined corpus from all datasets
+# 5. Build combined corpus from ALL datasets (streaming tokenize of every .jsonl)
 echo ""
 echo "=== Building training corpus ==="
-python -c "
-import torch, os, glob, json
-from fractus.tokenizer import FractusTokenizer
-tok = FractusTokenizer.gpt2_compatible()
+python scripts/build_corpus.py --src data/hf_datasets --out data/training_corpus.pt --cap 1000000000
 
-# Collect all .pt datasets.
-pt_files = sorted(glob.glob('data/hf_datasets/datasets/*.pt'))
-print(f'Found {len(pt_files)} pre-tokenized datasets')
-
-all_tokens = []
-total = 0
-for f in pt_files:
-    try:
-        t = torch.load(f, weights_only=False)
-        all_tokens.append(t)
-        total += len(t)
-        print(f'  {os.path.basename(f)}: {len(t):,} tokens')
-    except Exception as e:
-        print(f'  SKIP {f}: {e}')
-
-# Also tokenize raw JSONL datasets.
-for jsonl_dir in ['data/hf_datasets/neuro_code_math', 'data/hf_datasets/cognitive_skills']:
-    if os.path.exists(jsonl_dir):
-        files = sorted(glob.glob(os.path.join(jsonl_dir, '*.jsonl')))
-        for jf in files[:5]:  # first 5 files per dir for speed
-            texts = []
-            with open(jf, 'r', encoding='utf-8', errors='ignore') as fh:
-                for line in fh:
-                    try:
-                        entry = json.loads(line.strip())
-                        if 'messages' in entry:
-                            text = ' '.join(m.get('content','') for m in entry['messages'])
-                        elif 'instruction' in entry:
-                            text = entry.get('instruction','') + ' ' + entry.get('output','')
-                        elif 'text' in entry:
-                            text = entry['text']
-                        else:
-                            continue
-                        if text and len(text) > 20:
-                            texts.append(text)
-                    except:
-                        pass
-            if texts:
-                combined = '\\n\\n'.join(texts[:200])
-                tokens = tok.encode(combined)
-                all_tokens.append(torch.tensor(tokens, dtype=torch.int32))
-                total += len(tokens)
-
-print(f'\\nTotal tokens: {total:,}')
-mega = torch.cat(all_tokens)
-g = torch.Generator().manual_seed(42)
-# Cap at 1B tokens: uses all available data (the HF repo holds ~1B+),
-# and a 1B-element permutation fits in ~8GB RAM on a GPU box.
-# The 1B training stage requests 2B tokens — it will iterate over
-# everything available here.
-perm = torch.randperm(min(len(mega), 1_000_000_000), generator=g)
-mega = mega[perm].to(torch.int32)
-torch.save(mega, 'data/training_corpus.pt')
-print(f'Saved training_corpus.pt: {len(mega):,} tokens ({os.path.getsize(\"data/training_corpus.pt\")/1e6:.0f}MB)')
-"
-
-# 6. Train paliers 0-3 on CPU (if no checkpoint exists)
+# 6. Train paliers 0-3 (GPU if available, else CPU — auto-detected)
 if [ ! -f "checkpoints/fractus_palier3.pt" ]; then
     echo ""
-    echo "=== Training paliers 0-3 (CPU) ==="
-    # Update train_progressive to use the new corpus.
+    echo "=== Training paliers 0-3 (auto: GPU if present) ==="
     export FRACTUS_CORPUS="data/training_corpus.pt"
     python scripts/train_progressive.py --paliers 0,1,2,3 --accumulation-steps 8
 else
