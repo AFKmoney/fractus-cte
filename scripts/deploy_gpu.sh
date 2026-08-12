@@ -23,6 +23,24 @@ echo "=== GPU Check ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 echo ""
 
+# 1b. Preflight: disk + HF token (catch problems before the long download/train).
+echo "=== Preflight ==="
+FREE_GB=$(df -BG . 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G')
+if [ -n "$FREE_GB" ] && [ "$FREE_GB" -lt 20 ]; then
+    echo "WARNING: only ${FREE_GB}GB free on disk — need ~20GB (3GB datasets + 4GB corpus + ~8GB checkpoints)."
+    echo "         Continuing, but the run may fail mid-training."
+else
+    echo "  disk: ${FREE_GB:-?}GB free (need ~20GB) — OK"
+fi
+if [ -z "$HF_TOKEN" ]; then
+    echo "  HF_TOKEN: NOT SET — the 1B checkpoint upload to HF will be skipped."
+    echo "           Set it with: export HF_TOKEN=hf_xxx (from https://huggingface.co/settings/tokens)"
+else
+    echo "  HF_TOKEN: set — 1B will upload to thefinalboss/Fractus-1B"
+fi
+python -c "import sys; print(f'  python: {sys.version.split()[0]}')" || echo "  python: MISSING"
+echo ""
+
 # 2. Install dependencies
 echo "=== Installing dependencies ==="
 pip install torch numpy tokenizers matplotlib huggingface_hub --quiet
