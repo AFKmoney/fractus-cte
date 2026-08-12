@@ -16,6 +16,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 HF_REPO = "thefinalboss/fractus-datasets"
 
+_TOKEN_CACHE = None
+def gh_token():
+    """GitHub token from `gh auth token` (cached). Enables private-repo access."""
+    global _TOKEN_CACHE
+    if _TOKEN_CACHE is None:
+        try:
+            _TOKEN_CACHE = subprocess.check_output(
+                ["gh", "auth", "token"], text=True).strip()
+        except Exception:
+            _TOKEN_CACHE = ""
+    return _TOKEN_CACHE
+
 # Text-bearing extensions (code + prose + config). All feed the LM.
 TEXT_EXT = {
     ".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json", ".json5",
@@ -95,18 +107,22 @@ def should_include(path: str, name: str) -> bool:
 def clone(repo: str, dest: str) -> bool:
     """Download a repo tarball and extract into dest. Returns True on success.
 
-    Uses codeload (HTTPS tarball) — far more reliable than git clone for
-    batch ops (no git-protocol fetch-pack failures). Tries main then master,
-    with one retry per branch.
+    Uses the GitHub API tarball endpoint with the gh token — works for BOTH
+    public and private repos (codeload is unauthenticated, private-only).
+    Tries main then master, with one retry per branch.
     """
     owner = repo.split("/")[0] if "/" in repo else "AFKmoney"
     name = repo.split("/")[-1]
+    token = gh_token()
     last_err = ""
     for branch in ("main", "master"):
-        url = f"https://codeload.github.com/{owner}/{name}/tar.gz/refs/heads/{branch}"
+        url = f"https://api.github.com/repos/{owner}/{name}/tarball/{branch}"
         for attempt in (1, 2):
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "fractus-dataset"})
+                headers = {"User-Agent": "fractus-dataset"}
+                if token:
+                    headers["Authorization"] = f"token {token}"
+                req = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(req, timeout=180) as r:
                     data = r.read()
                 with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
@@ -178,10 +194,32 @@ def upload(local_path: str, repo_name: str):
     print(f"  → uploaded to {HF_REPO}/repos/{safe}/data.jsonl", flush=True)
 
 
+def all_repos_from_gh(owner="AFKmoney"):
+    """All repo names (public + private) via `gh repo list`."""
+    out = subprocess.check_output(
+        ["gh", "repo", "list", owner, "--limit", "200", "--json", "name"],
+        text=True)
+    return [r["name"] for r in json.loads(out)]
+
+
+def already_uploaded():
+    """Set of repo names already present as repos/<name>/data.jsonl on HF."""
+    from huggingface_hub import HfApi
+    files = HfApi().list_repo_files(HF_REPO, repo_type="dataset")
+    done = set()
+    for f in files:
+        parts = f.split("/")
+        if len(parts) == 3 and parts[0] == "repos" and parts[2] == "data.jsonl":
+            done.add(parts[1])
+    return done
+
+
 def main():
     ap = argparse.ArgumentParser(description="Convert GitHub repos to JSONL")
     ap.add_argument("repos", nargs="*", help="repo names (e.g. AFKmoney/kortex)")
     ap.add_argument("--batch", choices=["all"], help="use the predefined high-value list")
+    ap.add_argument("--all-from-gh", action="store_true",
+                    help="fetch ALL repos (public+private) via gh and skip already-uploaded")
     ap.add_argument("--no-upload", action="store_true", help="skip HF upload")
     ap.add_argument("--out-dir", default="data/_repos_jsonl")
     args = ap.parse_args()
@@ -189,15 +227,27 @@ def main():
     repos = args.repos
     if args.batch == "all":
         repos = HIGH_VALUE_REPOS
+    if args.all_from_gh:
+        repos = all_repos_from_gh()
     if not repos:
-        ap.error("provide repos or --batch all")
+        ap.error("provide repos, --batch all, or --all-from-gh")
+
+    # Skip repos already on HF (only meaningful when uploading).
+    skip = already_uploaded() if not args.no_upload else set()
+    todo = [r for r in repos if r.split("/")[-1] not in skip]
+    if skip:
+        print(f"  {len(skip)} already on HF — skipping. {len(todo)} to convert.",
+              flush=True)
 
     os.makedirs(args.out_dir, exist_ok=True)
-    print(f"=== Converting {len(repos)} repos ===", flush=True)
+    print(f"=== Converting {len(todo)} repos ===", flush=True)
+    if not todo:
+        print("Nothing to do — all repos already uploaded.", flush=True)
+        return
     t0 = time.time()
     grand_bytes = 0
     done = 0
-    for i, repo in enumerate(repos, 1):
+    for i, repo in enumerate(todo, 1):
         name = repo.split("/")[-1]
         print(f"\n[{i}/{len(repos)}] {repo}", flush=True)
         out_path = os.path.join(args.out_dir, f"{name}.jsonl")
@@ -213,7 +263,7 @@ def main():
         except Exception as e:
             print(f"  ERROR: {e}", flush=True)
 
-    print(f"\n=== DONE: {done}/{len(repos)} repos, {grand_bytes:,} chars "
+    print(f"\n=== DONE: {done}/{len(todo)} repos, {grand_bytes:,} chars "
           f"(~{grand_bytes//4:,} tokens) in {time.time()-t0:.0f}s ===", flush=True)
 
 
