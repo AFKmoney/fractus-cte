@@ -25,6 +25,8 @@ from fractus.grow import grow_cte
 
 CORPUS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "data", "quality_corpus.pt")
+# Allow override via env (set by deploy_gpu.sh) or --corpus flag (resolved in main).
+CORPUS = os.environ.get("FRACTUS_CORPUS", CORPUS)
 
 # The growth ladder. Each palier is bigger than the last.
 # d_model grows ~2x, n_heads keeps d_head=64, experts grow, rank grows.
@@ -128,6 +130,8 @@ def main():
                     help="gradient accumulation steps (fewer optimizer steps = faster)")
     ap.add_argument("--compile", action="store_true",
                     help="enable torch.compile on tick_chunk_train (reduce-overhead mode)")
+    ap.add_argument("--corpus", type=str, default=CORPUS,
+                    help="path to tokenized corpus .pt (default: env FRACTUS_CORPUS or data/quality_corpus.pt)")
     args = ap.parse_args()
 
     palier_indices = [int(x) for x in args.paliers.split(",")]
@@ -140,7 +144,7 @@ def main():
     print(f"Compile: {args.compile}", flush=True)
 
     # Load corpus.
-    tokens = torch.load(CORPUS, weights_only=False).to(torch.int64)
+    tokens = torch.load(args.corpus, weights_only=False).to(torch.int64)
     print(f"Corpus: {len(tokens):,} tokens", flush=True)
 
     engine = None

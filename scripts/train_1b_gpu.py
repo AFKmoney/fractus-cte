@@ -37,10 +37,12 @@ CORPUS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
                       "data", "quality_corpus.pt")
 
 # 1B target config (white paper config K).
+# n_layers=16 is required to reach ~1.05B params (verified: 1,048,631,458).
 TARGET_1B = dict(
     d_model=1280, n_heads=20, d_head=64, n_levels=2,
     n_oscillators=16, coupling_rank=8,
     n_experts=128, top_k=2, expert_d_ff=2048, siren_rank=64,
+    n_layers=16,
 )
 
 
@@ -198,7 +200,6 @@ def main():
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--seq-len", type=int, default=64)
     ap.add_argument("--lr", type=float, default=1e-4)
-    ap.add_argument("--accumulation-stays", type=int, default=4)
     ap.add_argument("--accumulation-steps", type=int, default=4)
     ap.add_argument("--bf16", action="store_true", default=True,
                     help="enable bf16 mixed precision (default: on)")

@@ -25,7 +25,7 @@ echo ""
 
 # 2. Install dependencies
 echo "=== Installing dependencies ==="
-pip install torch numpy tokenizers matplotlib --quiet
+pip install torch numpy tokenizers matplotlib huggingface_hub --quiet
 echo "Done"
 
 # 3. Clone fractus-cte
