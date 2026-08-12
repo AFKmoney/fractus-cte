@@ -66,10 +66,10 @@ def main():
         except Exception as e:
             print(f"  SKIP {f}: {e}", flush=True)
 
-    # ── 2. All .jsonl / .jsonl.gz across every subfolder (streaming) ────
+    # ── 2. All .jsonl / .jsonl.gz anywhere under src (recursive) ────────
     jsonl_files = sorted(
-        glob.glob(os.path.join(args.src, "*", "*.jsonl")) +
-        glob.glob(os.path.join(args.src, "*", "*.jsonl.gz")))
+        glob.glob(os.path.join(args.src, "**", "*.jsonl"), recursive=True) +
+        glob.glob(os.path.join(args.src, "**", "*.jsonl.gz"), recursive=True))
     print(f"\n=== {len(jsonl_files)} .jsonl/.jsonl.gz files (streaming tokenize) ===",
           flush=True)
     for jf in jsonl_files:
