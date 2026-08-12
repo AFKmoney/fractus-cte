@@ -102,7 +102,11 @@ for jsonl_dir in ['data/hf_datasets/neuro_code_math', 'data/hf_datasets/cognitiv
 print(f'\\nTotal tokens: {total:,}')
 mega = torch.cat(all_tokens)
 g = torch.Generator().manual_seed(42)
-perm = torch.randperm(min(len(mega), 500_000_000), generator=g)  # cap at 500M for paliers 0-3
+# Cap at 1B tokens: uses all available data (the HF repo holds ~1B+),
+# and a 1B-element permutation fits in ~8GB RAM on a GPU box.
+# The 1B training stage requests 2B tokens — it will iterate over
+# everything available here.
+perm = torch.randperm(min(len(mega), 1_000_000_000), generator=g)
 mega = mega[perm].to(torch.int32)
 torch.save(mega, 'data/training_corpus.pt')
 print(f'Saved training_corpus.pt: {len(mega):,} tokens ({os.path.getsize(\"data/training_corpus.pt\")/1e6:.0f}MB)')

@@ -286,6 +286,51 @@ class ContinuousThoughtEngine(nn.Module):
         # Shared thought state (residual stream).
         self.register_buffer("thought_state", torch.zeros(1, 1, d_model))
 
+    @classmethod
+    def from_pretrained(cls, ckpt_path: str, map_location: str = "cpu") -> "ContinuousThoughtEngine":
+        """Load a ContinuousThoughtEngine from a checkpoint saved by the
+        training scripts.
+
+        The checkpoint must contain a 'model_state' (state_dict) and a
+        'config' dict with the constructor args. Weights are loaded with
+        shape-matching, so a checkpoint grown to a larger config still
+        loads its overlapping subset.
+        """
+        ckpt = torch.load(ckpt_path, weights_only=False, map_location=map_location)
+        cfg = ckpt.get("config", {})
+        model_sd = ckpt["model_state"]
+
+        # n_layers: prefer the config; else infer by counting block indices.
+        if "n_layers" in cfg:
+            n_layers = cfg["n_layers"]
+        else:
+            n_layers = 1
+            for key in model_sd:
+                if key.startswith("blocks."):
+                    n_layers = max(n_layers, int(key.split(".")[1]) + 1)
+
+        engine = cls(
+            vocab_size=cfg.get("vocab_size", 50257),
+            d_model=cfg["d_model"],
+            n_heads=cfg.get("n_heads", 4),
+            d_head=cfg.get("d_head", 64),
+            n_layers=n_layers,
+            n_levels=cfg.get("n_levels", 2),
+            n_oscillators=cfg.get("n_oscillators", 8),
+            coupling_rank=cfg.get("coupling_rank", 4),
+            n_experts=cfg.get("n_experts", 8),
+            top_k=cfg.get("top_k", 2),
+            expert_d_ff=cfg.get("expert_d_ff", 256),
+            siren_rank=cfg.get("siren_rank", 32),
+        )
+        own_sd = engine.state_dict()
+        for key, val in model_sd.items():
+            if key in own_sd and own_sd[key].shape == val.shape:
+                own_sd[key] = val
+        engine.load_state_dict(own_sd)
+        engine.reset_thought(batch_size=1)
+        return engine
+
     def reset_thought(self, batch_size: int = 1):
         """Reset the thought state and all per-block states to zero."""
         self.thought_state = torch.zeros(batch_size, 1, self.d_model,

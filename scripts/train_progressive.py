@@ -41,17 +41,19 @@ PALIERS = [
 ]
 
 
-def train_palier(engine, tokens, n_tokens, lr, palier_name, accumulation_steps=8):
+def train_palier(engine, tokens, n_tokens, lr, palier_name, accumulation_steps=8, device=None):
     """Train one palier using the fast OnlineTrainer (chunked, head-last).
 
     Trains in SEGMENTS with periodic logging so we see progress.
+    If device is given (e.g. 'cuda'), the engine + tensors move there —
+    paliers train in minutes on GPU instead of hours on CPU.
     """
     print(f"\n{'='*60}", flush=True)
     print(f"TRAINING {palier_name}", flush=True)
     print(f"  d_model={engine.d_model}, experts={engine.blocks[0].moe.n_experts}, "
           f"rank={engine.blocks[0].moe.expert_rank}, "
           f"params={sum(p.numel() for p in engine.parameters()):,}", flush=True)
-    print(f"  tokens={n_tokens:,}, lr={lr}", flush=True)
+    print(f"  tokens={n_tokens:,}, lr={lr}, device={device or 'cpu'}", flush=True)
     print(f"{'='*60}", flush=True)
 
     if n_tokens == 0:
@@ -59,6 +61,9 @@ def train_palier(engine, tokens, n_tokens, lr, palier_name, accumulation_steps=8
         return engine
 
     torch.set_num_threads(os.cpu_count() or 6)
+    if device is not None:
+        engine = engine.to(device)
+    dev = next(engine.parameters()).device
     chunk_len = 32
     trainer = OnlineTrainer(engine, lr=lr, accumulation_steps=accumulation_steps)
 
@@ -76,8 +81,8 @@ def train_palier(engine, tokens, n_tokens, lr, palier_name, accumulation_steps=8
     trainer.optimizer.zero_grad()
 
     for start in range(0, len(train_tokens) - chunk_len - 1, chunk_len):
-        chunk = train_tokens[start:start + chunk_len].unsqueeze(0)
-        target = train_tokens[start + chunk_len]
+        chunk = train_tokens[start:start + chunk_len].unsqueeze(0).to(dev)
+        target = train_tokens[start + chunk_len].to(dev)
         last_logits = engine.tick_chunk_train(chunk)
         loss = F.cross_entropy(last_logits, target.unsqueeze(0)) / accum
         loss.backward()
@@ -117,6 +122,10 @@ def train_palier(engine, tokens, n_tokens, lr, palier_name, accumulation_steps=8
           f"({chunk_idx * chunk_len:,} tokens in {elapsed/60:.1f}min, "
           f"{chunk_idx * chunk_len / max(elapsed,1):.0f} tok/s)", flush=True)
 
+    # Move back to CPU so the next grow_cte (CPU build + in-place weight copy)
+    # doesn't hit a cross-device error. Checkpoints are saved on CPU too.
+    if device is not None:
+        engine = engine.cpu()
     return engine
 
 
@@ -133,7 +142,19 @@ def main():
                     help="enable torch.compile on tick_chunk_train (reduce-overhead mode)")
     ap.add_argument("--corpus", type=str, default=CORPUS,
                     help="path to tokenized corpus .pt (default: env FRACTUS_CORPUS or data/quality_corpus.pt)")
+    ap.add_argument("--device", type=str, default="auto",
+                    help="device: 'auto' (cuda if available else cpu), 'cuda', or 'cpu'")
     args = ap.parse_args()
+
+    # Resolve device.
+    if args.device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
+    dev = torch.device(device) if device != "cpu" else None
+    print(f"Device: {device}", flush=True)
+    if device == "cuda":
+        print(f"  GPU: {torch.cuda.get_device_name(0)}", flush=True)
 
     palier_indices = [int(x) for x in args.paliers.split(",")]
     torch.manual_seed(args.seed)
@@ -226,7 +247,7 @@ def main():
         # Train this palier.
         n_tokens = args.tokens_per_palier or config["tokens"]
         engine = train_palier(engine, tokens, n_tokens, config["lr"], palier_name,
-                              accumulation_steps=args.accumulation_steps)
+                              accumulation_steps=args.accumulation_steps, device=dev)
 
         # Save checkpoint.
         ckpt_path = os.path.join(
