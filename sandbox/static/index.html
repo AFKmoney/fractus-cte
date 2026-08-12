@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fractus Sandbox — CTE Cockpit</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>FRACTUS <span class="accent">// SANDBOX</span></h1>
+  <div class="status-pill">
+    <span id="conn-dot" class="dot"></span>
+    <span id="conn-txt">CONNECTING…</span>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- 1. Live Monitor -->
+  <div class="panel span-1 row-2">
+    <h2>Live Monitor <span class="val" id="n-blocks">—</span> blocks</h2>
+    <div class="metrics">
+      <div class="metric"><div class="label">‖thought‖</div><div class="num" id="thought-norm">—</div></div>
+      <div class="metric"><div class="label">confidence</div><div class="num" id="confidence">—</div>
+        <div class="gauge"><div class="fill" id="conf-gauge" style="width:0%"></div></div></div>
+      <div class="metric"><div class="label">ticks</div><div class="num" id="tick-count">0</div></div>
+      <div class="metric"><div class="label">lb_loss</div><div class="num" id="lb-loss">—</div></div>
+      <div class="metric"><div class="label">salience_loss</div><div class="num" id="salience-loss">—</div></div>
+      <div class="metric"><div class="label">memories</div><div class="num" id="mem-count">0</div></div>
+      <div class="metric"><div class="label">μ(thought)</div><div class="num" id="thought-mean">—</div></div>
+      <div class="metric"><div class="label">σ(thought)</div><div class="num" id="thought-std">—</div></div>
+    </div>
+  </div>
+
+  <!-- 2. Oscilloscope -->
+  <div class="panel span-2">
+    <h2>Oscilloscope <span class="val">Kuramoto phases</span></h2>
+    <canvas class="scope" id="scope"></canvas>
+  </div>
+
+  <!-- 3. Expert Routing -->
+  <div class="panel span-1">
+    <h2>Expert Routing <span class="val" id="routing-info">—</span></h2>
+    <canvas class="bars" id="routing"></canvas>
+  </div>
+
+  <!-- 4. Training Curve -->
+  <div class="panel span-2">
+    <h2>Training Curve <span class="val" id="curve-info">—</span></h2>
+    <canvas class="curve" id="curve"></canvas>
+    <div class="train-input">
+      <input id="train-input" type="text" placeholder="text to train on (correction by gradient)…">
+      <button class="btn" onclick="doTrain()">TRAIN</button>
+    </div>
+  </div>
+
+  <!-- 5. Memory Bank -->
+  <div class="panel span-1 row-2">
+    <h2>Memory Bank <span class="val" id="mem-count-2">persistent</span></h2>
+    <div class="mem-list" id="mem-list"><div class="empty">loading…</div></div>
+    <div class="train-input" style="margin-top:6px">
+      <input id="mem-add-input" type="text" placeholder="add memory text…">
+      <button class="btn ghost" onclick="addMem()">+</button>
+    </div>
+  </div>
+
+  <!-- 6. Cognitive Mode -->
+  <div class="panel span-1">
+    <h2>Cognitive Mode <span class="val" id="mode-conf">—</span></h2>
+    <div class="mode-name" id="mode-name">—</div>
+    <div class="mode-bars" id="mode-bars"></div>
+  </div>
+
+  <!-- 7. Chat + Controls -->
+  <div class="panel span-2">
+    <h2>Chat + Controls</h2>
+    <div class="chat-log" id="chat-log">
+      <div class="msg system"><span class="role">system:</span> Fractus sandbox ready. Send a message to begin.</div>
+    </div>
+    <div class="chat-row">
+      <input id="chat-input" type="text" placeholder="talk to fractus…">
+      <button class="btn" onclick="doChat()">SEND</button>
+    </div>
+    <div class="controls-row">
+      <button class="btn ghost" onclick="doTick()">▸ TICK</button>
+      <button class="btn ghost" onclick="doReset()">⟲ RESET</button>
+      <button class="btn ghost" onclick="doGrow()">⬆ GROW</button>
+      <input id="inject-input" type="text" placeholder="inject tokens…" style="flex:2">
+      <button class="btn ghost" onclick="doInject()">INJECT</button>
+    </div>
+  </div>
+
+  <!-- 8. Config + Params -->
+  <div class="panel span-1">
+    <h2>Config <span class="val">params</span></h2>
+    <div class="cfg-row"><span class="lab">memory</span><div class="toggle on" id="tog-memory" onclick="toggleMemory()"></div></div>
+    <div class="cfg-row"><span class="lab">salience bias</span>
+      <input type="range" min="-3" max="3" step="0.1" value="0" oninput="salienceChange(this.value)">
+      <span class="v" id="salience-v">0</span></div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;font-size:10px;color:var(--muted);line-height:1.7">
+      d_model <span style="color:var(--accent)" id="p-dmodel">—</span> ·
+      layers <span style="color:var(--accent)" id="p-layers">—</span><br>
+      experts <span style="color:var(--accent)" id="p-experts">—</span> (top-<span id="p-topk">—</span>) ·
+      rank <span style="color:var(--accent)" id="p-rank">—</span><br>
+      oscillators <span style="color:var(--accent)" id="p-osc">—</span> ·
+      params <span style="color:var(--accent)" id="p-params">—</span>
+    </div>
+  </div>
+
+</div>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>
