@@ -15,7 +15,7 @@ batches (default 2000), so a multi-GB jsonl never sits fully in RAM.
 Usage:
     python scripts/build_corpus.py --src data/hf_datasets --out data/training_corpus.pt
 """
-import argparse, os, sys, glob, json, time
+import argparse, os, sys, glob, json, time, gzip
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 from fractus.tokenizer import FractusTokenizer
@@ -66,12 +66,16 @@ def main():
         except Exception as e:
             print(f"  SKIP {f}: {e}", flush=True)
 
-    # ── 2. All .jsonl across every subfolder (streaming) ────────────────
-    jsonl_files = sorted(glob.glob(os.path.join(args.src, "*", "*.jsonl")))
-    print(f"\n=== {len(jsonl_files)} .jsonl files (streaming tokenize) ===", flush=True)
+    # ── 2. All .jsonl / .jsonl.gz across every subfolder (streaming) ────
+    jsonl_files = sorted(
+        glob.glob(os.path.join(args.src, "*", "*.jsonl")) +
+        glob.glob(os.path.join(args.src, "*", "*.jsonl.gz")))
+    print(f"\n=== {len(jsonl_files)} .jsonl/.jsonl.gz files (streaming tokenize) ===",
+          flush=True)
     for jf in jsonl_files:
         batch, file_tokens = [], 0
-        with open(jf, "r", encoding="utf-8", errors="ignore") as fh:
+        opener = gzip.open if jf.endswith(".gz") else open
+        with opener(jf, "rt", encoding="utf-8", errors="ignore") as fh:
             for line in fh:
                 try:
                     text = extract_text(json.loads(line))
