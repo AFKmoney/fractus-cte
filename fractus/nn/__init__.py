@@ -1,26 +1,21 @@
 """nn subpackage: neural network modules (PyTorch).
 
-L1: fractal embedding (FractalEmbedding).
-L2a: causal linear attention (FractalLinearAttention) + minimal block (FractalBlock).
-L2b: Kuramoto (KuramotoLayer) + von Mises/Farey MoE (PhaseRoutedMoE) + full block (FractalBlockFull).
+Modules present in fractus-cte:
+  - attention:    FractalLinearAttention (causal, linear, with S,z state carry)
+  - phase_ode:    KuramotoLayer (coupled oscillator "consciousness clock")
+  - moe:          PhaseRoutedMoE (von Mises gate, low-rank experts, self-modifying)
+  - farey:        farey_sequence, expert_phases (phase distribution helpers)
+  - stats:        elu_plus_one, stable_softmax
+  - lazy_siren:   LazyStructuredSirenLinear (LoRA-style low-rank, no grid memory)
 """
 
-from .char_features import CharClassFeatures
-from .fourier import MandelbrotFourierBasis
-from .embedding import FractalEmbedding
 from .stats import elu_plus_one, stable_softmax
 from .attention import FractalLinearAttention
 from .farey import farey_sequence, expert_phases
 from .phase_ode import KuramotoLayer
 from .moe import PhaseRoutedMoE
-from .block import FractalBlock, FractalBlockFull
-from .siren import TorusSirenWeight
-from .siren_linear import SirenLinear
 
 __all__ = [
-    "CharClassFeatures",
-    "MandelbrotFourierBasis",
-    "FractalEmbedding",
     "elu_plus_one",
     "stable_softmax",
     "FractalLinearAttention",
@@ -28,8 +23,4 @@ __all__ = [
     "expert_phases",
     "KuramotoLayer",
     "PhaseRoutedMoE",
-    "FractalBlock",
-    "FractalBlockFull",
-    "TorusSirenWeight",
-    "SirenLinear",
 ]
