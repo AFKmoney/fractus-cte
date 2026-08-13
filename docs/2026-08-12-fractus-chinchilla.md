@@ -75,8 +75,8 @@ because ~12% of the model arrives pre-trained.
 | | Value |
 |---|---|
 | Tokens available in dataset | **~3–4 B** (after the Aug-12 data work) |
-| Chinchilla target (active) | **2.4–3.7 B** |
-| Corpus cap (current default) | 1 B ← **raise to ~3 B to hit Chinchilla** |
+| Chinchilla floor (active) | **2.4–3.7 B** |
+| Corpus cap (current default) | 1 B ← **raise to ~3 B so the 1B palier is healthily fed** |
 | `--tokens` for `train_1b_gpu.py` | set to **~3 000 000 000** |
 | Est. time @ 4000 tok/s (RTX 3090) | 3 B / 4000 ≈ **9 days**; @ 8000 tok/s ≈ 4 days |
 
@@ -84,3 +84,34 @@ The dataset is now correctly sized: **the data we assembled is Chinchilla-optima
 Fractus's active capacity.** The only change needed for Thursday is lifting the corpus
 cap from 1 B → ~3 B so the model actually sees Chinchilla-scale data instead of a
 1/3 sample.
+
+---
+
+## ⚠ Chinchilla is a snapshot law — Fractus is not a snapshot model
+
+Everything above gives a **number for a fixed point in time** (the 1B palier). That is a
+floor for healthy initial feeding, **not a target and not a ceiling**. The reason standard
+LLM intuition keeps failing here:
+
+| Static-transformer thinking | Fractus reality |
+|---|---|
+| N is fixed (1.049B) | N **grows forever** — width, depth, experts, rank all increase across paliers |
+| Chinchilla: 20×N once, then stop | Chinchilla has **no stopping point** — the data stream is perpetual |
+| Corpus = assembled, then frozen | Corpus = **continuous pipeline**, always being added to |
+| Train 3B → deploy | Train **continuously**, grow when ready, never "done" |
+| Fixed capacity → data to fill it | **Data drives growth** — `maybe_grow` adds experts when routing demands it |
+
+Fractus is a **living system**, not a model you train and ship:
+- the **online trainer** learns from every interaction (tick by tick);
+- the **5% memory injection** consolidates salient thoughts every tick;
+- **`maybe_grow`** adds new experts when one expert dominates routing — capacity is
+  created *in response to what the model is experiencing*;
+- **progressive growth** means the parameter count is a function of time and data, not
+  a constant.
+
+So the right way to read the active-param Chinchilla number is **instantaneous**: at any
+moment, the model's current active capacity is healthily fed by ~20× its active params in
+*cumulative* exposure. As the model grows (more blocks, more experts), its appetite grows
+with it — and there is no final checkpoint. The ~3–4 B assembled today is the **starting
+nutrition** for the 1B palier; the data pipeline must keep flowing for the lifetime of the
+agent. Feed it, let it grow, repeat — indefinitely.
