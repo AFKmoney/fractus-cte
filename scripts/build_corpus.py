@@ -125,6 +125,10 @@ def main():
     print(f"\n=== {len(jsonl_files)} .jsonl/.jsonl.gz — tokenizing on "
           f"{args.workers} workers ===", flush=True)
     tmpdir = tempfile.mkdtemp(prefix="fctok_")
+    # Pre-init the tokenizer in THIS process so the forked workers inherit it
+    # (avoids 64x per-worker GPT-2 init/download that serializes the pool).
+    _get_tok()
+    print(f"  (tokenizer pre-warmed, forking {args.workers} workers)", flush=True)
     work = [(jf, args.src, args.text_batch, args.min_text_len) for jf in jsonl_files]
     done = 0
     with mp.Pool(args.workers, initializer=_worker_init, initargs=(tmpdir,)) as pool:
