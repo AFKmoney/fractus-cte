@@ -242,7 +242,7 @@ class PhaseRoutedMoE(nn.Module):
         idx_flat = topk_idx.reshape(N, K)
 
         if self.expert_rank is not None:
-            chunk = getattr(self, "gather_chunk", 2048)
+            chunk = getattr(self, "gather_chunk", 64)
             if N <= chunk:
                 return self._gather_compute_chunk(h_flat, idx_flat).reshape(B, L, K, D)
             outs = []
