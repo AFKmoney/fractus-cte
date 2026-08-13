@@ -190,78 +190,64 @@ class PhaseRoutedMoE(nn.Module):
         self.n_experts = new_E
         return old_E  # index of the new expert
 
-    def _gather_compute_chunk(self, h_c: torch.Tensor, idx_c: torch.Tensor) -> torch.Tensor:
-        """Low-rank expert FFN for ONE chunk of tokens. Pure function (no side
-        effects) — safe under torch.utils.checkpoint.
-
-        h_c   : (n, D)      idx_c : (n, K)   →   out : (n, K, D)
-        Math is IDENTICAL to the old dense gather; only the scope is a chunk."""
-        n = h_c.shape[0]
-        K = idx_c.shape[1]
-        r = self.expert_rank
-        flat = idx_c.reshape(-1)  # (n*K,)
-        g_U1 = self.U1.index_select(0, flat).reshape(n, K, self.d_ff, r)
-        g_V1 = self.V1.index_select(0, flat).reshape(n, K, h_c.shape[1], r)
-        g_s1 = self.scale1.index_select(0, flat).reshape(n, K, 1, 1)
-        g_b1 = self.b1.index_select(0, flat).reshape(n, K, self.d_ff)
-        g_U2 = self.U2.index_select(0, flat).reshape(n, K, h_c.shape[1], r)
-        g_V2 = self.V2.index_select(0, flat).reshape(n, K, self.d_ff, r)
-        g_s2 = self.scale2.index_select(0, flat).reshape(n, K, 1, 1)
-        g_b2 = self.b2.index_select(0, flat).reshape(n, K, h_c.shape[1])
-        hV1 = torch.einsum('nd,nkdr->nkr', h_c, g_V1)
-        h1 = g_s1.squeeze(-1) * torch.einsum('nkr,nkfr->nkf', hV1, g_U1) + g_b1
-        h1_act = _gelu(h1)
-        hV2 = torch.einsum('nkf,nkfr->nkr', h1_act, g_V2)
-        out = g_s2.squeeze(-1) * torch.einsum('nkr,nkdr->nkd', hV2, g_U2) + g_b2
-        return out  # (n, K, D)
-
     def _sparse_expert_forward(
         self, h: torch.Tensor, topk_idx: torch.Tensor
     ) -> torch.Tensor:
-        """GATHER-FIRST sparse forward, CHUNKED + CHECKPOINTED.
+        """GATHER-FIRST sparse forward: compute ONLY the top_k experts per token.
 
         h        : (B, L, d_model)
-        topk_idx : (B, L, K) — indices in [0, E) of the selected experts
-                   (chosen by PHASE routing in _compute_gates — NOT touched here).
+        topk_idx : (B, L, K) — indices in [0, E) of the selected experts.
         Returns  : (B, L, K, d_model) — output of each selected expert.
 
-        Memory-bounded: the old version materialized 8 dense (B·L, K, ...) tensors
-        at once → OOM at B≥4. This version streams the B·L tokens in chunks of
-        `gather_chunk` and wraps each chunk in torch.utils.checkpoint, so peak
-        memory (forward AND backward) is bounded by chunk_size × K, not B·L × K.
-        The phase routing, the von Mises gate, the top-K selection, the low-rank
-        expert math, and the load-balance loss are ALL UNCHANGED — this only
-        changes how the already-selected experts' outputs are materialized.
-        Output is bit-identical to the dense gather.
+        This is the L8 optimization. Instead of materializing the (B,L,E,d_model)
+        full-expert tensor and gathering (wasting (E-K)/E of the matmul), we
+        index_select the K experts' weights PER TOKEN, then do one batched
+        matmul. Work scales with K, not E.
         """
-        from torch.utils.checkpoint import checkpoint
         B, L, D = h.shape
         K = topk_idx.shape[-1]
-        N = B * L
-        h_flat = h.reshape(N, D)
-        idx_flat = topk_idx.reshape(N, K)
+
+        # Gather the K selected experts' weights PER TOKEN.
+        flat_idx = topk_idx.reshape(-1)  # (B*L*K,)
 
         if self.expert_rank is not None:
-            chunk = getattr(self, "gather_chunk", 64)
-            if N <= chunk:
-                return self._gather_compute_chunk(h_flat, idx_flat).reshape(B, L, K, D)
-            outs = []
-            for s in range(0, N, chunk):
-                e = min(s + chunk, N)
-                outs.append(self._gather_compute_chunk(h_flat[s:e], idx_flat[s:e]))
-            return torch.cat(outs, dim=0).reshape(B, L, K, D)
+            # Sparse LOW-RANK path: gather U/V/scale factors, compute 2 matmuls per expert.
+            # This computes only K experts instead of E — at top-k=2, E=128, that's 64x less work.
+            r = self.expert_rank
+            g_U1 = self.U1.index_select(0, flat_idx).reshape(B*L, K, self.d_ff, r)
+            g_V1 = self.V1.index_select(0, flat_idx).reshape(B*L, K, D, r)
+            g_s1 = self.scale1.index_select(0, flat_idx).reshape(B*L, K, 1, 1)
+            g_b1 = self.b1.index_select(0, flat_idx).reshape(B*L, K, self.d_ff)
+            g_U2 = self.U2.index_select(0, flat_idx).reshape(B*L, K, D, r)
+            g_V2 = self.V2.index_select(0, flat_idx).reshape(B*L, K, self.d_ff, r)
+            g_s2 = self.scale2.index_select(0, flat_idx).reshape(B*L, K, 1, 1)
+            g_b2 = self.b2.index_select(0, flat_idx).reshape(B*L, K, D)
 
-        # Dense-expert sparse path (small E, unchanged).
-        flat_idx = topk_idx.reshape(-1)
+            # Layer 1: flatten B,L → N=B*L for einsum over K experts.
+            N = B * L
+            h_flat = h.reshape(N, D)  # (N, D)
+            # hV1[n,k,r] = Σ_d h_flat[n,d] · g_V1[n,k,d,r]
+            hV1 = torch.einsum('nd,nkdr->nkr', h_flat, g_V1)  # (N, K, r)
+            # h1[n,k,f] = scale1 · Σ_r hV1[r] · U1[f,r] + b1
+            h1 = g_s1.squeeze(-1) * torch.einsum('nkr,nkfr->nkf', hV1, g_U1) + g_b1  # (N, K, F)
+            h1_act = _gelu(h1)
+
+            # Layer 2: out[n,k,d] = scale2 · Σ_r (h1_act @ V2)[r] · U2[d,r] + b2
+            hV2 = torch.einsum('nkf,nkfr->nkr', h1_act, g_V2)  # (N, K, r)
+            out = g_s2.squeeze(-1) * torch.einsum('nkr,nkdr->nkd', hV2, g_U2) + g_b2  # (N, K, D)
+            return out.reshape(B, L, K, D)
+
+        # Dense sparse path (original).
         w1_sel = self.w1.index_select(0, flat_idx).reshape(B, L, K, D, self.d_ff)
         b1_sel = self.b1.index_select(0, flat_idx).reshape(B, L, K, self.d_ff)
         w2_sel = self.w2.index_select(0, flat_idx).reshape(B, L, K, self.d_ff, D)
         b2_sel = self.b2.index_select(0, flat_idx).reshape(B, L, K, D)
-        h_exp = h.unsqueeze(2).unsqueeze(-1)
-        h1 = (h_exp * w1_sel).sum(dim=-2) + b1_sel
+
+        h_exp = h.unsqueeze(2).unsqueeze(-1)  # (B, L, 1, D, 1)
+        h1 = (h_exp * w1_sel).sum(dim=-2) + b1_sel  # (B, L, K, F)
         h1_act = _gelu(h1)
-        h1_act_exp = h1_act.unsqueeze(-1)
-        out = (h1_act_exp * w2_sel).sum(dim=-2) + b2_sel
+        h1_act_exp = h1_act.unsqueeze(-1)  # (B, L, K, F, 1)
+        out = (h1_act_exp * w2_sel).sum(dim=-2) + b2_sel  # (B, L, K, D)
         return out
 
     def _dense_expert_forward(self, h: torch.Tensor) -> torch.Tensor:
