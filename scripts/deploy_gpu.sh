@@ -49,8 +49,8 @@ echo "Done"
 # 3. Clone fractus-cte
 echo ""
 echo "=== Cloning fractus-cte ==="
-git clone https://github.com/AFKmoney/fractus-cte.git
-cd fractus-cte
+git clone https://github.com/AFKmoney/fractus-cte.git 2>/dev/null || true
+cd fractus-cte || { echo "fractus-cte dir missing, aborting"; exit 1; }
 
 # 4. Download datasets from HF
 echo ""
