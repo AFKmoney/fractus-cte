@@ -104,6 +104,46 @@ def should_include(path: str, name: str) -> bool:
     return ext in TEXT_EXT
 
 
+# ── Secret filtering ─────────────────────────────────────────────────────
+# Files matching these filename patterns are skipped outright (high-density
+# secret carriers).
+import re as _re
+FILENAME_SECRET_RE = _re.compile(
+    r"(^\.env$|\.env\.|^secrets?\.[a-z]+$|^credentials?\.|^\.npmrc$|"
+    r"\.pem$|\.key$|\.p12$|\.pfx$|\.keystore$|\.jks$|\.wif$|"
+    r"^id_rsa|^id_ed25519|^id_ecdsa|^wallet\.|^wallets?/|"
+    r"mnemonic|seed_?phrase|private_?key\.|service_account)",
+    _re.IGNORECASE)
+
+# High-precision content patterns. If ANY match, the whole file is skipped —
+# better to drop a legit file than leak a key.
+SECRET_CONTENT_RES = [_re.compile(p) for p in [
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----",
+    # key = "value" / key: value  with a cred-like name and 16+ char value
+    r"""(?i)(?:api[_-]?key|api[_-]?secret|secret[_-]?key|access[_-]?token|"""
+    r"""auth[_-]?token|bearer|client[_-]?secret|private[_-]?key|wallet|"""
+    r"""mnemonic|seed[_-]?phrase|passphrase|password|passwd|consumer[_-]?secret)"""
+    r"""\s*[:=]\s*['"]?[A-Za-z0-9+/=_\-]{16,}""",
+    r"(?<![A-Za-z0-9])sk-[A-Za-z0-9]{20,}",                # OpenAI
+    r"(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36,}",         # GitHub PAT
+    r"(?<![A-Za-z0-9])hf_[A-Za-z0-9]{30,}",                # HuggingFace
+    r"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}",                   # AWS access key
+    r"(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,}",       # Slack
+    r"(?<![A-Za-z0-9])sk_(?:live|test)_[A-Za-z0-9]{20,}",  # Stripe secret
+    r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}",  # JWT
+    r"[a-z][a-z0-9+\-.]*://[^\s/:@]+:[^\s/:@]+@[^\s/]+",   # user:pass@host conn string
+    r"(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{87,88}(?![1-9A-HJ-NP-Za-km-z])",  # Solana base58 privkey
+]]
+
+
+def looks_like_secret(text: str) -> bool:
+    """True if the text contains a high-confidence secret pattern."""
+    for rx in SECRET_CONTENT_RES:
+        if rx.search(text):
+            return True
+    return False
+
+
 def clone(repo: str, dest: str) -> bool:
     """Download a repo tarball and extract into dest. Returns True on success.
 
@@ -148,7 +188,7 @@ def convert(repo: str, out_path: str) -> int:
         local = os.path.join(td, "_repo")
         if not clone(repo, td):
             return 0
-        n_files, n_bytes = 0, 0
+        n_files, n_bytes, n_skipped_secret = 0, 0, 0
         with open(out_path, "w", encoding="utf-8") as out:
             for root, dirs, files in os.walk(local):
                 dirs[:] = [d for d in dirs if d not in SKIP_DIRS
@@ -156,6 +196,11 @@ def convert(repo: str, out_path: str) -> int:
                            and "egg-info" not in d]
                 for fn in files:
                     if not should_include(root, fn):
+                        continue
+                    # Skip secret-dense filenames outright.
+                    if FILENAME_SECRET_RE.search(fn) or FILENAME_SECRET_RE.search(
+                            os.path.relpath(root, local)):
+                        n_skipped_secret += 1
                         continue
                     fp = os.path.join(root, fn)
                     try:
@@ -167,6 +212,10 @@ def convert(repo: str, out_path: str) -> int:
                         continue
                     if not text.strip():
                         continue
+                    # Scan content for secrets — skip the whole file on any match.
+                    if looks_like_secret(text):
+                        n_skipped_secret += 1
+                        continue
                     rel = os.path.relpath(fp, local)
                     out.write(json.dumps({
                         "text": text,
@@ -175,6 +224,8 @@ def convert(repo: str, out_path: str) -> int:
                     }, ensure_ascii=False) + "\n")
                     n_files += 1
                     n_bytes += len(text)
+        if n_skipped_secret:
+            print(f"  [secret-filter] {n_skipped_secret} files skipped", flush=True)
         print(f"  {n_files} files, {n_bytes:,} chars (~{n_bytes//4:,} tokens)",
               flush=True)
         return n_bytes
