@@ -34,6 +34,8 @@ def extract_text(entry: dict) -> str:
         return entry.get("prompt", "") + " " + entry.get("completion", "")
     if "text" in entry:                                  # plain text
         return entry["text"]
+    if "content" in entry and isinstance(entry["content"], str):  # bare content
+        return entry["content"]
     return ""
 
 
