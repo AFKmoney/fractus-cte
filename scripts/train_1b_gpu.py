@@ -90,45 +90,51 @@ def train_1b_gpu(engine, tokens, n_tokens, lr, batch_size, seq_len,
             pass
 
     engine.train()
-    engine.reset_thought(batch_size=1)
+    # B independent streams, each carrying its own continuous thought state.
+    # Batching B chunks/step saturates the GPU (was 1 chunk/step = ~50% util).
+    B = max(1, batch_size)
+    engine.reset_thought(batch_size=B)
 
     t0 = time.time()
     total_loss = 0.0
     total_correct = 0
     total_n = 0
-    chunk_idx = 0
+    step_idx = 0
     opt.zero_grad()
 
-    g = torch.Generator().manual_seed(42)
     n = tokens.numel()
+    shard = n // B                                  # each stream walks its own region
+    tokens_per_stream = max(1, min(n_tokens // B, shard - seq_len - 1))
+    n_steps = max(1, tokens_per_stream // seq_len)
+    positions = [i * shard for i in range(B)]       # current pos of each stream
 
-    for start in range(0, min(n_tokens, n - seq_len - 1), seq_len):
-        chunk = tokens[start:start + seq_len].unsqueeze(0).to(device)
-        target = tokens[start + seq_len].to(device)
+    for step in range(n_steps):
+        chunks = torch.stack([tokens[p:p + seq_len] for p in positions]).to(device)
+        targets = torch.tensor([tokens[p + seq_len] for p in positions], device=device)
 
         if use_bf16:
             with torch.autocast(device_type="cuda", dtype=dtype):
-                last_logits = engine.tick_chunk_train(chunk)
-                loss = F.cross_entropy(last_logits, target.unsqueeze(0)) / accumulation_steps
+                last_logits = engine.tick_chunk_train(chunks)
+                loss = F.cross_entropy(last_logits, targets) / accumulation_steps
         else:
-            last_logits = engine.tick_chunk_train(chunk)
-            loss = F.cross_entropy(last_logits, target.unsqueeze(0)) / accumulation_steps
+            last_logits = engine.tick_chunk_train(chunks)
+            loss = F.cross_entropy(last_logits, targets) / accumulation_steps
 
         loss.backward()
 
         total_loss += loss.item() * accumulation_steps
-        pred = last_logits.argmax(dim=-1)
-        total_correct += (pred == target.unsqueeze(0)).sum().item()
-        total_n += 1
-        chunk_idx += 1
+        total_correct += (last_logits.argmax(dim=-1) == targets).sum().item()
+        total_n += B
+        step_idx += 1
+        positions = [p + seq_len for p in positions]   # advance each stream
 
-        if chunk_idx % accumulation_steps == 0:
+        if step_idx % accumulation_steps == 0:
             torch.nn.utils.clip_grad_norm_(engine.parameters(), 1.0)
             opt.step()
             opt.zero_grad()
 
-        if chunk_idx % log_every == 0:
-            processed = chunk_idx * seq_len
+        if step_idx % log_every == 0:
+            processed = step_idx * seq_len * B
             elapsed = time.time() - t0
             rate = processed / max(elapsed, 1)
             avg = total_loss / max(total_n, 1)
@@ -137,19 +143,20 @@ def train_1b_gpu(engine, tokens, n_tokens, lr, batch_size, seq_len,
             mem_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0
             print(f"  {processed:>10,}/{n_tokens:,} loss={avg:.3f} ppl={ppl:.1f} "
                   f"acc={acc:.3f} {rate:.0f} tok/s "
-                  f"GPU_mem={mem_gb:.1f}GB", flush=True)
+                  f"GPU_mem={mem_gb:.1f}GB (B={B})", flush=True)
 
     # Final remainder.
-    if chunk_idx % accumulation_steps != 0:
+    if step_idx % accumulation_steps != 0:
         torch.nn.utils.clip_grad_norm_(engine.parameters(), 1.0)
         opt.step()
 
     elapsed = time.time() - t0
     avg_loss = total_loss / max(total_n, 1)
     ppl = math.exp(min(avg_loss, 20))
+    done_tok = step_idx * seq_len * B
     print(f"\n  DONE: loss={avg_loss:.3f} ppl={ppl:.1f} "
-          f"({chunk_idx * seq_len:,} tokens in {elapsed/3600:.1f}h, "
-          f"{chunk_idx * seq_len / max(elapsed,1):.0f} tok/s)", flush=True)
+          f"({done_tok:,} tokens in {elapsed/3600:.1f}h, "
+          f"{done_tok / max(elapsed,1):.0f} tok/s)", flush=True)
     return engine
 
 

@@ -61,6 +61,9 @@ def _tokenize_one(args):
     tok = _get_tok()
     opener = gzip.open if jf.endswith(".gz") else open
     batch = []
+    batch_chars = 0
+    MAX_CHARS = 2_000_000  # flush when accumulated text hits ~2MB (fixes huge-entry
+                           # files like gutenberg's 487 book-length lines stalling)
     local = []
     file_tokens = 0
     try:
@@ -72,9 +75,10 @@ def _tokenize_one(args):
                     continue
                 if text and len(text) > min_text_len:
                     batch.append(text)
-                if len(batch) >= text_batch:
+                    batch_chars += len(text)
+                if len(batch) >= text_batch or batch_chars >= MAX_CHARS:
                     t = torch.tensor(tok.encode("\n\n".join(batch)), dtype=torch.int64)
-                    local.append(t); file_tokens += len(t); batch = []
+                    local.append(t); file_tokens += len(t); batch = []; batch_chars = 0
         if batch:
             t = torch.tensor(tok.encode("\n\n".join(batch)), dtype=torch.int64)
             local.append(t); file_tokens += len(t)
