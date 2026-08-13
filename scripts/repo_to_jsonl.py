@@ -300,7 +300,7 @@ def main():
     done = 0
     for i, repo in enumerate(todo, 1):
         name = repo.split("/")[-1]
-        print(f"\n[{i}/{len(repos)}] {repo}", flush=True)
+        print(f"\n[{i}/{len(todo)}] {repo}", flush=True)
         out_path = os.path.join(args.out_dir, f"{name}.jsonl")
         try:
             nb = convert(repo, out_path)
