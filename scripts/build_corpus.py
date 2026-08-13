@@ -25,9 +25,11 @@ def extract_text(entry: dict) -> str:
     """Pull raw text out of common JSONL schemas (zero hard-coded dirs)."""
     if "messages" in entry:                              # chat format
         return " ".join(m.get("content", "") for m in entry["messages"])
-    if "instruction" in entry:                           # alpaca format
+    if "instruction" in entry:                           # alpaca / neuro-paradigm format
         return (entry.get("instruction", "") + " "
-                + entry.get("input", "") + " " + entry.get("output", ""))
+                + entry.get("input", "") + " "
+                + entry.get("response", "") + " "       # neuro_paradigms uses 'response'
+                + entry.get("output", ""))
     if "prompt" in entry:                                # completion format
         return entry.get("prompt", "") + " " + entry.get("completion", "")
     if "text" in entry:                                  # plain text
