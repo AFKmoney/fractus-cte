@@ -248,9 +248,7 @@ class PhaseRoutedMoE(nn.Module):
             outs = []
             for s in range(0, N, chunk):
                 e = min(s + chunk, N)
-                outs.append(checkpoint(self._gather_compute_chunk,
-                                       h_flat[s:e], idx_flat[s:e],
-                                       use_reentrant=False))
+                outs.append(self._gather_compute_chunk(h_flat[s:e], idx_flat[s:e]))
             return torch.cat(outs, dim=0).reshape(B, L, K, D)
 
         # Dense-expert sparse path (small E, unchanged).
