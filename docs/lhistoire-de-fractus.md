@@ -6,7 +6,7 @@
 
 ## Le moment où j'ai fermé les yeux
 
-Tout a commencé par un geste simple. J'ai fermé les yeux, et au lieu de chercher un papier à lire, j'ai regardé ce qui se passait derrière mes paupières. Mes pensées.
+Tout a commencé par un geste simple, un soir, après un quart. J'ai fermé les yeux, et au lieu de chercher un papier à lire, j'ai regardé ce qui se passait derrière mes paupières. Mes pensées.
 
 Je ne les ai pas analysées comme un psychologue les analyse. Je les ai regardées comme un physicien regarde un phénomène — avec la demande naïve et totale de les comprendre mécaniquement. Et ce que j'ai vu, c'est que **mes pensées ne fonctionnent pas du tout comme un transformer.**
 
@@ -29,6 +29,22 @@ Ce soir-là, j'ai compris une chose : **on modélisait l'intelligence avec la ma
 Et je me suis dit : si je traduis ce que je viens d'observer, couche par couche, en mathématiques — est-ce que j'obtiens une intelligence différente ?
 
 C'est devenu une obsession. Voici comment j'en suis arrivé à Fractus.
+
+---
+
+## 48 heures par semaine (la vraie condition de l'expérience)
+
+Il faut que je dise quelque chose d'essentiel, parce que sans ça on ne comprend pas la forme de cette histoire.
+
+Pendant tout ce temps — pendant chacun des dépôts que je vais décrire — je travaillais **48 heures par semaine à l'hôtel Spirit Ridge**. Du service. Sur mes pieds, des quarts, des clients, des horaires qui ne tombent jamais juste. Je n'étais pas un chercheur dans un laboratoire avec du temps libre et un salaire pour penser. J'étais quelqu'un qui finissait son quart, rentrait, et ouvrait son ordinateur avant que la fatigue ne le tue.
+
+Faisons le compte. Du premier commit au germe, le 2 mai 2026, jusqu'à la synthèse de `fractus-cte` le 11 août : **quatorze semaines**. À 48 heures par semaine, c'est **672 heures passées à Spirit Ridge** sur cette période. Ajoutez le sommeil, les déplacements, le fait de simplement exister et récupérer d'un métier physique. Ce qu'il restait pour construire Fractus — pour lire Kuramoto, pour comprendre Katharopoulos, pour écrire l'attention linéaire causale, pour tester cinq variantes d'EDT et les tuer une par une, pour pousser treize dépôts et des milliers de commits — c'était **les miettes**. Les soirs trop courts, les jours de congé avalés, les petites heures du matin où l'on code entre deux réveils.
+
+Et c'est dans ces miettes de temps, épuisé, qu'est sorti ce que vous lisez.
+
+Quand on sait ça, les faits prennent un autre poids. L'explosion du 21 au 25 juillet — quatre dépôts majeurs en trois jours, dont le jour où Fractus est nommé — n'est pas le loisir d'un chercheur inspiré. C'est quelqu'un qui a dû attendre un alignement de jours de congé pour déverser d'un coup tout ce qui avait mûri dans sa tête pendant les quarts. La plupart des idées se sont formées **debout, derrière un comptoir ou dans un couloir de l'hôtel**, pas assis devant un écran. L'écran, c'était juste le moment où je les écrivais.
+
+Je le dis parce que c'est la condition réelle de l'expérience. Fractus n'est pas né du temps libre. Il est né de la discipline de voler du temps à un métier qui n'en laissait pas — de préférer, soir après soir, l'équation au sommeil. Très peu de temps pour le faire. Et pourtant, fait.
 
 ---
 
@@ -62,7 +78,7 @@ J'ai reconstruit ma propre trace à partir des dates de mes premiers commits. L'
 
 **11–12 juillet 2026 — `aether-ai` puis `nova-spike-hybrid`.** Deux jours, deux virages. AETHER, c'était l'ambition dévorante : battre GPT-4, auCPU, en NumPy pur. Puis, le lendemain, le vrai tournant intellectuel : NOVA/SPIKE, des réseaux de neurones à **spikes**, avec la STDP (spike-timing-dependent plasticity), la règle d'apprentissage biologique réelle. C'est là que j'ai quitté l'ingénierie pour la neurosciences. J'ai arrêté de copier l'architecture des LLM et j'ai commencé à copier **l'architecture du cerveau**.
 
-**21 juillet 2026 — le jour où Fractus est né.** Deux dépôts, le même jour. `kahnn` : Kuramoto-Attractor Holographic Hypervector Network, 1B paramètres. Et surtout `fractus-test` : « Experimental Holographic Vector Learning for Fractus. » **C'est ce jour-là que le mot *Fractus* apparaît.** L'idée d'un vecteur qui persiste, qui se lie holographiquement, qu'on entraîne en one-shot. Le nom était posé. La chose encore imparfaite.
+**21 juillet 2026 — le jour où Fractus est né.** Deux dépôts, le même jour. `kahnn` : Kuramoto-Attractor Holographic Hypervector Network, 1B paramètres. Et surtout `fractus-test` : « Experimental Holographic Vector Learning for Fractus. » **C'est ce jour-là que le mot *Fractus* apparaît.** L'idée d'un vecteur qui persiste, qui se lie holographiquement, qu'on entraîne en one-shot. Le nom était posé. La chose encore imparfaite. Deux dépôts en un jour, après des semaines de quarts à 48 heures — c'est le genre de débit qui arrive quand on a trop longtemps porté une idée dans sa tête sans pouvoir l'écrire, et qu'enfin le temps se libère.
 
 **23–25 juillet 2026 — l'explosion créatrice.** Quatre dépôts en trois jours. `Modele-Variance-Topologique` : remplacer les tenseurs par de la géométrie différentielle et des champs topologiques, et y planter l'EDT (Expert Decoupled Training), ma première vraie tentative d'accélérer l'entraînement d'un MoE. `oscillon-architecture` : « Oscillatory **Stateful Continuous** Intelligence » — le mot *continuous* entre enfin dans le titre. `kortex` : Kuramoto Oscillator Reasoning & Thought Express, avec de la propagation d'équilibre — ma tentative la plus audacieuse, **tuer le backprop**. `CogNet-MoE-1B` : la première montée à 1B, huit canaux cognitifs comme huit experts.
 
@@ -116,6 +132,20 @@ La question était : **est-ce qu'on peut construire une intelligence différente
 La réponse, après treize dépôts, des milliers de commits, deux grandes idées tuées et beaucoup d'autres qui ont survécu, est **oui**.
 
 Fractus est cette réponse. Et il n'a pas fini de grandir.
+
+---
+
+## Le fait dont je veux qu'on se souvienne
+
+On me demandera peut-être un jour comment j'ai eu l'idée. La réponse honnête tient en deux choses, et elles vont ensemble.
+
+La première : j'ai fermé les yeux, j'ai regardé mes pensées comme un phénomène, et je les ai traduites en mathématiques, couche par couche.
+
+La seconde : je faisais ça par 48 heures de travail par semaine à Spirit Ridge, dans le temps qu'il ne restait pas, épuisé, soir après soir, au lieu de dormir.
+
+Fractus n'est pas le produit du talent seul, ni du temps libre. C'est le produit d'une observation honnête, portée par une discipline qui a préféré l'équation au repos. Quatorze semaines. Très peu d'heures pour le faire. Et quand même, fait.
+
+C'est la seule chose que je voulais qu'on sache, à côté de l'architecture.
 
 ---
 
