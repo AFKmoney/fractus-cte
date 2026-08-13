@@ -272,11 +272,11 @@ def main():
 
     engine = engine.to(device)
 
-    # Eval before training.
-    nll_before, ppl_before = evaluate(engine, tokens)
-    print(f"\nBefore: NLL={nll_before:.3f} PPL={ppl_before:.1f}", flush=True)
-
-    # Train.
+    # Eval before training — SKIPPED: evaluate() leaves ~5GB cached that pushes
+    # B≥4 training into OOM. The pre-training PPL is non-essential. We eval
+    # AFTER training instead. Free the cache to maximise training headroom.
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     print(f"\nTraining: {args.tokens:,} tokens, lr={args.lr}, "
           f"accum={args.accumulation_steps}, bf16={args.bf16}", flush=True)
     engine = train_1b_gpu(
