@@ -44,35 +44,59 @@ def get_engine():
             from fractus.memory import PersistentMemory
 
             tok = FractusTokenizer.gpt2_compatible()
+
+            # 1B config — the REAL Fractus (d=1280, 16 blocks, 128 experts)
             engine = ContinuousThoughtEngine(
-                vocab_size=50257, d_model=128,
-                n_heads=4, d_head=32, n_levels=2,
-                n_oscillators=16, n_experts=8, top_k=2,
+                vocab_size=50257, d_model=1280,
+                n_heads=20, d_head=64, n_levels=2,
+                n_oscillators=16, coupling_rank=8,
+                n_experts=128, top_k=2,
+                expert_d_ff=2048, siren_rank=64, n_layers=16,
             )
 
-            # Load trained weights: download from HF hub (palier0 — trained seed).
+            # Load the trained 1B checkpoint (loss ~80 from overnight training)
             import torch
             try:
                 from huggingface_hub import hf_hub_download
                 ckpt_file = hf_hub_download(
                     "thefinalboss/fractus-cte",
-                    "checkpoints/fractus_palier0.pt",
+                    "checkpoints/fractus_1b_gpu3.pt",  # best overnight (loss 80.9)
                     repo_type="model")
                 sd = torch.load(ckpt_file, weights_only=False, map_location="cpu")
                 state = sd.get("model_state", sd)
-                # Shape-matched load (config must match Space's d_model=128).
                 own = engine.state_dict()
                 matched = {k: v for k, v in state.items()
                            if k in own and own[k].shape == v.shape}
                 own.update(matched)
                 engine.load_state_dict(own)
-                print(f"[Fractus] Loaded trained palier0: {len(matched)}/{len(own)} tensors matched", flush=True)
+                print(f"[Fractus] Loaded 1B checkpoint: {len(matched)}/{len(own)} tensors "
+                      f"({sum(p.numel() for p in engine.parameters())/1e9:.2f}B params)", flush=True)
             except Exception as e:
-                print(f"[Fractus] Checkpoint load failed ({e}) — random weights", flush=True)
+                print(f"[Fractus] 1B load failed ({e}) — trying palier0 fallback", flush=True)
+                # Fallback: small palier0
+                engine = ContinuousThoughtEngine(
+                    vocab_size=50257, d_model=128,
+                    n_heads=4, d_head=32, n_levels=2,
+                    n_oscillators=16, n_experts=8, top_k=2,
+                )
+                try:
+                    from huggingface_hub import hf_hub_download
+                    ckpt_file = hf_hub_download(
+                        "thefinalboss/fractus-cte",
+                        "checkpoints/fractus_palier0.pt",
+                        repo_type="model")
+                    sd = torch.load(ckpt_file, weights_only=False, map_location="cpu")
+                    state = sd.get("model_state", sd)
+                    own = engine.state_dict()
+                    matched = {k: v for k, v in state.items()
+                               if k in own and own[k].shape == v.shape}
+                    own.update(matched)
+                    engine.load_state_dict(own)
+                    print(f"[Fractus] Loaded palier0 fallback", flush=True)
+                except Exception:
+                    print("[Fractus] Random weights", flush=True)
 
             kb = KnowledgeBase(d_model=128)
-
-            # Load persisted KB if it exists (resumes memory across restarts).
             kb_path = os.environ.get("FRACTUS_KB_PATH", "/data/fractus_kb.pkl")
             if os.path.exists(kb_path):
                 try:
