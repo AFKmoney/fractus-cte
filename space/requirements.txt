@@ -1,0 +1,7 @@
+torch
+spaces
+gradio
+huggingface_hub
+tokenizers
+transformers
+numpy
