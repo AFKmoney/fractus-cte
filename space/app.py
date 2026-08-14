@@ -50,18 +50,25 @@ def get_engine():
                 n_oscillators=16, n_experts=8, top_k=2,
             )
 
-            # Load trained weights from HF if a checkpoint is provided.
-            ckpt_path = os.environ.get("FRACTUS_CHECKPOINT")
-            if ckpt_path and os.path.exists(ckpt_path):
-                import torch
-                print(f"[Fractus] Loading checkpoint: {ckpt_path}", flush=True)
-                sd = torch.load(ckpt_path, weights_only=False, map_location="cpu")
-                # Best-effort load — the CTE and Fractus-1B don't share exact
-                # parameter names, but layers with matching shapes will load.
-                engine.load_state_dict(sd.get("model_state", sd), strict=False)
-                print(f"[Fractus] Checkpoint loaded (strict=False)", flush=True)
-            else:
-                print("[Fractus] WARNING: no checkpoint — using random weights", flush=True)
+            # Load trained weights: download from HF hub (palier0 — trained seed).
+            import torch
+            try:
+                from huggingface_hub import hf_hub_download
+                ckpt_file = hf_hub_download(
+                    "thefinalboss/fractus-cte",
+                    "checkpoints/fractus_palier0.pt",
+                    repo_type="model")
+                sd = torch.load(ckpt_file, weights_only=False, map_location="cpu")
+                state = sd.get("model_state", sd)
+                # Shape-matched load (config must match Space's d_model=128).
+                own = engine.state_dict()
+                matched = {k: v for k, v in state.items()
+                           if k in own and own[k].shape == v.shape}
+                own.update(matched)
+                engine.load_state_dict(own)
+                print(f"[Fractus] Loaded trained palier0: {len(matched)}/{len(own)} tensors matched", flush=True)
+            except Exception as e:
+                print(f"[Fractus] Checkpoint load failed ({e}) — random weights", flush=True)
 
             kb = KnowledgeBase(d_model=128)
 
