@@ -70,23 +70,24 @@ except Exception as e:
     print("[Fractus] Fallback small model loaded", flush=True)
 
 
-@spaces.GPU(duration=120)  # A100 for up to 120s per request
+@spaces.GPU(duration=120)
 def generate(prompt: str, max_tokens: int = 60, temperature: float = 0.8) -> str:
-    """Generation runs on A100. Engine moves to GPU, generates, moves back."""
+    """Generation on ZeroGPU (A100). If GPU unavailable, falls back to CPU."""
     global engine
-    engine = engine.to("cuda")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    engine = engine.to(device)
     engine.reset_thought(batch_size=1)
 
     try:
         ids = tok.encode(prompt)[:32]
         for t in ids:
-            engine.tick(torch.tensor([t], device="cuda"))
+            engine.tick(torch.tensor([t], device=device))
 
         generated = list(ids)
         cur = ids[-1] if ids else 0
         for _ in range(max_tokens):
             with torch.no_grad():
-                logits, conf = engine.tick(torch.tensor([cur], device="cuda"))
+                logits, conf = engine.tick(torch.tensor([cur], device=device))
             l = logits[0] / max(temperature, 1e-8)
             topv, topi = l.topk(40)
             probs = torch.softmax(topv, dim=-1)
@@ -98,7 +99,8 @@ def generate(prompt: str, max_tokens: int = 60, temperature: float = 0.8) -> str
             cur = nxt
         return tok.decode(generated)
     finally:
-        engine = engine.to("cpu")  # free the GPU
+        if device.type == "cuda":
+            engine = engine.to("cpu")  # free the GPU
 
 
 def chat(message: str, history: list) -> str:
