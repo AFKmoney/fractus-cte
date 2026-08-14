@@ -233,8 +233,8 @@ async def chat(req: ChatRequest):
     # 2. Retrieve relevant memories + generate a reply (also learns the input).
     try:
         result = e["rag"].converse(req.message, speaker=req.speaker)
-        reply = result.get("response", "(Fractus stayed silent.)")
-        memories_used = len(result.get("retrieved", []))
+        reply = result.get("answer", "") or "(Fractus stayed silent.)"
+        memories_used = len(result.get("retrieved_context", ""))
         stored = True
         # Persist the KB in background.
         save_kb_async()
