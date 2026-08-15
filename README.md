@@ -25,6 +25,26 @@ datasets:
 
 **A living AI that thinks continuously, remembers forever, and grows on its own.**
 
+**Fractus is NOT a transformer.** It's a Continuous Cognitive Agent — a dynamical system that maintains a persistent thought state, advances it tick by tick through 16 blocks, and routes via Kuramoto oscillator phases. The checkpoint is a living seed: it never freezes, grows at runtime, and trains forever.
+
+## Quick Start
+
+```bash
+git clone https://github.com/AFKmoney/fractus-cte.git
+cd fractus-cte && pip install torch numpy tokenizers
+
+# Load the trained 1B and generate
+python -c "
+from fractus.continuous_engine import ContinuousThoughtEngine
+engine = ContinuousThoughtEngine.from_pretrained('checkpoints/fractus_1b_gpu3.pt')
+import torch
+logits, confidence = engine.tick(torch.tensor([42]))
+print(f'Fractus is thinking. Confidence: {confidence.item():.2f}')
+"
+```
+
+The `.pt` checkpoint contains the full model (weights + dynamic state). You need this repo's code to run it — Fractus is a custom architecture, not a transformer. Checkpoints are on [HF](https://huggingface.co/thefinalboss/fractus-cte).
+
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.13-green)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.9-orange)
