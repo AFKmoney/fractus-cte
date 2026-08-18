@@ -111,7 +111,7 @@ ContinuousThoughtEngine
 | **PhaseRoutedMoE** | Sparse experts routed by oscillator phases |
 | **Kuramoto Clock** | A dynamical system that drives routing decisions |
 | **Online Trainer** | Learns continuously, one chunk at a time |
-| **Multimodal `tick_vec`** | Vision patches bypass token embedding (CIFAR "eyes" prototype trained alongside text) |
+| **Vision (`tick_vec`)** | Multimodal input path — image patches drive the engine directly, bypassing the token embedding (CIFAR "eyes" prototype trained while the text run continued) |
 
 ---
 
@@ -130,6 +130,26 @@ ContinuousThoughtEngine
 **Hourly crash-recovery sync:** a daemon uploads all 8 per-GPU checkpoints every hour, mean-merges them into `FRACTUS_1B_8GPU_MERGED.pt`, republishes it under the recovery alias `FRACTUS_1B_STAGE2_MERGED.pt`, and writes a manifest with exact per-GPU token offsets. Any pod death is recoverable to the hour.
 
 **Honest generation state:** teacher-forced loss keeps falling (ema_tf ≈ 1.3–1.8 on the best GPUs), but free-run generation is still non-linguistic — diverse word-salad with repetition loops, better with window-based decoding (~25–28 unique tokens vs ~10–12 chunk-based). This is the documented exposure-bias gap, being closed by scheduled sampling + aligned decoding. Low TF loss does **not** mean the model can speak yet. See [Trusted Loss](#trusted-loss-reading-the-numbers).
+
+## Vision — the CIFAR "eyes" prototype
+
+Fractus is not text-only. The engine exposes **`tick_vec(obs_vec)`**: a multimodal entry point that accepts a precomputed `(B, d_model)` vector and injects it directly into the residual thought state — **bypassing the token embedding entirely**. Any modality that can be embedded into `d_model` dimensions can drive continuous thought: images, audio, sensor streams.
+
+```
+image → PatchEmbed → (B, d_model) patch vectors
+                            │
+                            ▼
+              engine.tick_vec(patch)     ← no tokenizer involved
+                            │
+              thought state advances through all 16 blocks
+              (same Kuramoto routing + MoE as text)
+```
+
+**Proof of concept — CIFAR-10 eyes:** a small CTE + PatchEmbed stack (`fractus/nn/vision.py`) was trained on CPU on real CIFAR-10 images (`fractus_eyes_cifar_final.pt`), demonstrating that image patches can drive the continuous-thought loop. Crucially, this ran as a **parallel track**: the 8-GPU text run was never interrupted for eyes work — GPU text digestion and CPU vision learning proceed simultaneously on the same living system.
+
+This mirrors the biological premise: eyes evolved as a peripheral sense feeding a central dynamical brain, not as a core feature of it. The text 1B is the brain; vision is a front-end that plugs into `tick_vec`.
+
+---
 
 ### Adapted Chinchilla target
 
@@ -343,6 +363,10 @@ engine.attach_memory(memory)
 engine.reset_thought(batch_size=1)
 logits, confidence = engine.tick(torch.tensor([42]))
 print(f"Confidence: {confidence.item():.2f}")
+
+# Vision: drive thought with an image patch vector (no tokenizer)
+patch_vec = torch.randn(1, 128)          # any (B, d_model) embedding
+logits, confidence = engine.tick_vec(patch_vec)
 ```
 
 ---
@@ -401,6 +425,8 @@ fractus-cte/
 **Expert**: a small low-rank network (`W = scale·U@Vᵀ`) that specializes in certain thoughts. Only 2 of 128 active per token.
 
 **Kuramoto clock**: coupled oscillators producing phase vectors that route tokens to experts — learned end-to-end since the routing surgery.
+
+**`tick_vec`**: the multimodal tick — feed any precomputed `(B, d_model)` vector (image patches, embeddings from any encoder) straight into the thought state without tokens. This is how vision plugs in.
 
 **Surgery**: patching code around a preserved checkpoint mid-training, resuming at the exact token offset. Weights are never wiped for a routing, objective, or decode bug.
 
