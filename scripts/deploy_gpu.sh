@@ -49,8 +49,8 @@ echo "Done"
 # 3. Clone fractus-cte
 echo ""
 echo "=== Cloning fractus-cte ==="
-git clone https://github.com/AFKmoney/fractus-cte.git 2>/dev/null || true
-cd fractus-cte || { echo "fractus-cte dir missing, aborting"; exit 1; }
+git clone https://github.com/AFKmoney/fractus-cte.git
+cd fractus-cte
 
 # 4. Download datasets from HF
 echo ""
@@ -68,8 +68,8 @@ print('Datasets downloaded')
 
 # 5. Build combined corpus from ALL datasets (streaming tokenize of every .jsonl)
 echo ""
-echo "=== Building training corpus (3B cap = sparse-MoE Chinchilla for ~119M active params) ==="
-python scripts/build_corpus.py --src data/hf_datasets --out data/training_corpus.pt --cap 3000000000
+echo "=== Building training corpus ==="
+python scripts/build_corpus.py --src data/hf_datasets --out data/training_corpus.pt --cap 1000000000
 
 # 6. Train paliers 0-3 (GPU if available, else CPU — auto-detected)
 if [ ! -f "checkpoints/fractus_palier3.pt" ]; then
@@ -82,17 +82,14 @@ else
     echo "=== Checkpoint exists, skipping paliers 0-3 ==="
 fi
 
-# 7. Grow to 1B + train on GPU (A100 80GB crunch config)
-#    NOTE: --batch-size is currently vestigial (loop runs B=1 chunk); the real
-#    throughput lever is --seq-len (more tokens per forward = better GPU util).
-#    3B tokens = sparse-MoE Chinchilla for ~119M active params.
+# 7. Grow to 1B + train on GPU
 echo ""
-echo "=== GPU Training: 1B (A100 80GB crunch config) ==="
+echo "=== GPU Training: 1B ==="
 echo "Loading palier 3 checkpoint, growing to 1B..."
 python scripts/train_1b_gpu.py \
     --checkpoint checkpoints/fractus_palier3.pt \
-    --tokens 3000000000 \
-    --seq-len 128 \
+    --tokens 2000000000 \
+    --batch-size 8 \
     --bf16 \
     --accumulation-steps 4 \
     --corpus data/training_corpus.pt

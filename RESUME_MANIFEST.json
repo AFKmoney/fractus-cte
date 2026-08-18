@@ -1,0 +1,42 @@
+{
+  "saved_at_utc": "2026-08-16T18:19:21.381727+00:00",
+  "reason": "GPU driver crash after routing surgery prep; resume without losing progress",
+  "step_tokens": 256,
+  "surgery": {
+    "gate_temp": 2.5,
+    "omega_scale": 4.0,
+    "lb_coef": 0.02,
+    "kuramoto_learned": true,
+    "lb_in_loss": true
+  },
+  "gpus": {
+    "0": {
+      "tokens_processed": 176281600,
+      "start_token": 176281600,
+      "last_loss": 30.3,
+      "checkpoint": "checkpoints/fractus_1b_gpu0.pt",
+      "shard": "data/shard_gpu0.pt"
+    },
+    "1": {
+      "tokens_processed": 186137600,
+      "start_token": 186137600,
+      "last_loss": 23.5,
+      "checkpoint": "checkpoints/fractus_1b_gpu1.pt",
+      "shard": "data/shard_gpu1.pt"
+    },
+    "2": {
+      "tokens_processed": 186854400,
+      "start_token": 186854400,
+      "last_loss": 25.2,
+      "checkpoint": "checkpoints/fractus_1b_gpu2.pt",
+      "shard": "data/shard_gpu2.pt"
+    },
+    "3": {
+      "tokens_processed": 183833600,
+      "start_token": 183833600,
+      "last_loss": 26.4,
+      "checkpoint": "checkpoints/fractus_1b_gpu3.pt",
+      "shard": "data/shard_gpu3.pt"
+    }
+  }
+}

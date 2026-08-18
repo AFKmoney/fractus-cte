@@ -76,10 +76,21 @@ def train_1b_gpu(engine, tokens, n_tokens, lr, batch_size, seq_len,
     vocab = engine.vocab_size
     dtype = torch.bfloat16 if use_bf16 else torch.float32
 
-    opt = torch.optim.SGD(engine.parameters(), lr=max(lr * 10, 1e-3), momentum=0.9, weight_decay=0.01)
+    opt = torch.optim.AdamW(engine.parameters(), lr=lr, weight_decay=0.01)
+
+    # PGSU setup.
+    pgsu = None
+    if pgsu_active:
+        try:
+            from fractus1B.pgsu import PGSU
+            # Note: PGSU works on Fractus1B (16 blocks). For the CTE (single MoE),
+            # PGSU is a no-op. This is here for when we switch to Fractus1B.
+            print("  PGSU: available for Fractus1B (not used on CTE)", flush=True)
+        except Exception:
+            pass
 
     engine.train()
-    engine.reset_thought(batch_size=batch_size)
+    engine.reset_thought(batch_size=1)
 
     t0 = time.time()
     total_loss = 0.0
@@ -88,38 +99,27 @@ def train_1b_gpu(engine, tokens, n_tokens, lr, batch_size, seq_len,
     chunk_idx = 0
     opt.zero_grad()
 
+    g = torch.Generator().manual_seed(42)
     n = tokens.numel()
-    B = batch_size
-    shard_size = n // B
-    shards = [tokens[i * shard_size:(i + 1) * shard_size] for i in range(B)]
-    cursors = [0] * B
-    stream_capacity = max((shard_size - seq_len - 1) // seq_len, 0)
-    n_iters = min(n_tokens // (B * seq_len), stream_capacity)
 
-    for _ in range(n_iters):
-        chunk_list, target_list = [], []
-        for i in range(B):
-            s = cursors[i]
-            chunk_list.append(shards[i][s:s + seq_len])
-            target_list.append(shards[i][s + seq_len])
-            cursors[i] = s + seq_len
-        chunk = torch.stack(chunk_list, dim=0).to(device)
-        target = torch.stack(target_list, dim=0).to(device)
+    for start in range(0, min(n_tokens, n - seq_len - 1), seq_len):
+        chunk = tokens[start:start + seq_len].unsqueeze(0).to(device)
+        target = tokens[start + seq_len].to(device)
 
         if use_bf16:
             with torch.autocast(device_type="cuda", dtype=dtype):
                 last_logits = engine.tick_chunk_train(chunk)
-                loss = F.cross_entropy(last_logits, target) / accumulation_steps
+                loss = F.cross_entropy(last_logits, target.unsqueeze(0)) / accumulation_steps
         else:
             last_logits = engine.tick_chunk_train(chunk)
-            loss = F.cross_entropy(last_logits, target) / accumulation_steps
+            loss = F.cross_entropy(last_logits, target.unsqueeze(0)) / accumulation_steps
 
         loss.backward()
 
         total_loss += loss.item() * accumulation_steps
         pred = last_logits.argmax(dim=-1)
-        total_correct += (pred == target).sum().item()
-        total_n += B
+        total_correct += (pred == target.unsqueeze(0)).sum().item()
+        total_n += 1
         chunk_idx += 1
 
         if chunk_idx % accumulation_steps == 0:
@@ -128,7 +128,7 @@ def train_1b_gpu(engine, tokens, n_tokens, lr, batch_size, seq_len,
             opt.zero_grad()
 
         if chunk_idx % log_every == 0:
-            processed = chunk_idx * seq_len * B
+            processed = chunk_idx * seq_len
             elapsed = time.time() - t0
             rate = processed / max(elapsed, 1)
             avg = total_loss / max(total_n, 1)
@@ -148,8 +148,8 @@ def train_1b_gpu(engine, tokens, n_tokens, lr, batch_size, seq_len,
     avg_loss = total_loss / max(total_n, 1)
     ppl = math.exp(min(avg_loss, 20))
     print(f"\n  DONE: loss={avg_loss:.3f} ppl={ppl:.1f} "
-          f"({chunk_idx * seq_len * B:,} tokens in {elapsed/3600:.1f}h, "
-          f"{chunk_idx * seq_len * B / max(elapsed,1):.0f} tok/s)", flush=True)
+          f"({chunk_idx * seq_len:,} tokens in {elapsed/3600:.1f}h, "
+          f"{chunk_idx * seq_len / max(elapsed,1):.0f} tok/s)", flush=True)
     return engine
 
 

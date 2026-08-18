@@ -120,11 +120,11 @@ class CTEBlock(nn.Module):
         attn_out = attn_out @ attn.w_out + attn.b_out
         h = h + attn_out
 
-        # Kuramoto: advance phases by one Euler step.
+        # Kuramoto: ALIGNED with tick_chunk_core (RK4), not single Euler step.
+        # Train/gen mismatch was: gen used Euler 0.1, train used full RK4 integrate.
         h_kur = self.norm_kur(h)
         theta = self.kuramoto._encode_from_hidden(h_kur)
-        theta = theta + 0.1 * self.kuramoto._derivative(theta)
-        theta = torch.remainder(theta, self.kuramoto.TWO_PI)
+        theta = self.kuramoto._rk4_integrate(theta)
         self.kuramoto_phases = theta.detach()
 
         # MoE: transform the thought, routed by Kuramoto phases.
@@ -198,12 +198,14 @@ class CTEBlock(nn.Module):
         attn_out = attn_out @ attn.w_out + attn.b_out
         h = h + attn_out
 
-        # Kuramoto (detached — clock, not learned).
-        with torch.no_grad():
-            h_kur = self.norm_kur(h)
-            theta = self.kuramoto._encode_from_hidden(h_kur)
-            theta = self.kuramoto._rk4_integrate(theta)
-        self.kuramoto_phases = theta
+        # Kuramoto: LEARNED clock (omega/coupling receive gradients).
+        # Phase state is still carried; parameters are no longer frozen.
+        h_kur = self.norm_kur(h)
+        theta = self.kuramoto._encode_from_hidden(h_kur)
+        theta = self.kuramoto._rk4_integrate(theta)
+        self.kuramoto_phases = theta.detach()  # carry state without backprop-through-time explosion
+        # Re-attach a differentiable theta for MoE routing so omega/coupling get CE+LB signal
+        theta = theta
 
         # MoE.
         h_moe = self.norm_moe(h)
@@ -374,6 +376,32 @@ class ContinuousThoughtEngine(nn.Module):
               f"(now {self.blocks[0].moe.n_experts} experts, dominance was {dominance:.2f})", flush=True)
         return True
 
+
+    def tick_vec(self, obs_vec: torch.Tensor) -> tuple:
+        """Advance one tick with a precomputed observation vector (B, d_model).
+
+        Used for vision / multimodal inputs that bypass the token embedding.
+        """
+        if obs_vec.dim() == 1:
+            obs_vec = obs_vec.unsqueeze(0)
+        assert obs_vec.shape[-1] == self.d_model, (obs_vec.shape, self.d_model)
+        B = self.thought_state.shape[0]
+        if obs_vec.shape[0] != B:
+            # broadcast or trim
+            obs_vec = obs_vec[:B]
+        h = self.thought_state + obs_vec.unsqueeze(1)
+
+        total_lb = torch.tensor(0.0, device=h.device)
+        for blk in self.blocks:
+            h, lb = blk.tick_single(h)
+            total_lb = total_lb + lb.detach()
+        self.last_lb_loss = total_lb
+        self._tick_count = getattr(self, '_tick_count', 0) + 1
+        self.thought_state = h.detach().clone()
+        confidence = torch.sigmoid(self.confidence_head(h[:, 0, :]).squeeze(-1))
+        output_logits = self.output_head(h[:, 0, :])
+        return output_logits, confidence
+
     def tick(self, observation: torch.Tensor = None) -> tuple:
         """Advance the thought by ONE tick through all blocks.
 
@@ -447,7 +475,11 @@ class ContinuousThoughtEngine(nn.Module):
         return output_logits
 
     def tick_chunk_train(self, observations: torch.Tensor) -> torch.Tensor:
-        """Fast training: head on LAST position only. Returns logits (B, vocab)."""
+        """Train over the full chunk: logits (B, C, vocab) for dense next-token CE.
+
+        Stage-2 surgery: supervise every position so the model must chain tokens,
+        not only collapse to a single last-position attractor.
+        """
         B, C = observations.shape
 
         obs_vecs = self.observe(observations)
@@ -457,12 +489,12 @@ class ContinuousThoughtEngine(nn.Module):
         total_lb = torch.tensor(0.0, device=h.device)
         for blk in self.blocks:
             h, lb = blk.tick_chunk_core(h)
-            total_lb = total_lb + lb.detach()
+            total_lb = total_lb + lb
         self.last_lb_loss = total_lb
 
         self.thought_state = h[:, -1:, :].detach()
-        last_logits = self.output_head(h[:, -1, :])
-        return last_logits
+        logits = self.output_head(h)  # (B, C, vocab)
+        return logits, total_lb
 
     def think(self, observations: torch.Tensor, max_ticks: int = 10,
               confidence_threshold: float = 0.7) -> torch.Tensor:

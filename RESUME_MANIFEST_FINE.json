@@ -1,0 +1,28 @@
+{
+  "saved_at_utc": "2026-08-16T22:53:28.053463+00:00",
+  "phase": "stage2_fine",
+  "lr": 0.0005,
+  "ema_beta": 0.98,
+  "gpus": {
+    "0": {
+      "start_token": 188172800,
+      "tokens_processed": 188172800,
+      "last_loss_cum": 9.4
+    },
+    "1": {
+      "start_token": 197862400,
+      "tokens_processed": 197862400,
+      "last_loss_cum": 1.9
+    },
+    "2": {
+      "start_token": 198835200,
+      "tokens_processed": 198835200,
+      "last_loss_cum": 2.3
+    },
+    "3": {
+      "start_token": 195993600,
+      "tokens_processed": 195993600,
+      "last_loss_cum": 5.7
+    }
+  }
+}
