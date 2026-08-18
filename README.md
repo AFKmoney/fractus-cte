@@ -27,6 +27,8 @@ datasets:
 
 **Fractus is NOT a transformer.** It's a Continuous Cognitive Agent — a dynamical system that maintains a persistent thought state, advances it tick by tick through 16 blocks, and routes via Kuramoto oscillator phases. The checkpoint is a living seed: it never freezes, grows at runtime, and trains forever.
 
+> **Status (2026-08-17):** Training live on 8× RTX 5090 — Phase 2, ~3.44B-token corpus, scheduled sampling engaged. Hourly checkpoints synced to this repo. Generation is not yet coherent English (word-salad stage); teacher-forced loss is falling steadily. This is a training-in-progress artifact, not a finished assistant. See [Live Training](#live-training-status).
+
 ## Quick Start
 
 ```bash
@@ -47,10 +49,11 @@ The `.pt` checkpoint contains the full model (weights + dynamic state). You need
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.13-green)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.9-orange)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.11-orange)
 ![Params](https://img.shields.io/badge/params-1.05B-red)
-![Status](https://img.shields.io/badge/status-active-brightgreen)
-![Datasets](https://img.shields.io/badge/datasets-4.15B%20tokens-purple)
+![Active](https://img.shields.io/badge/active%20params-119M-yellow)
+![Status](https://img.shields.io/badge/status-training%20live-brightgreen)
+![Datasets](https://img.shields.io/badge/datasets-4.2B%20tokens-purple)
 
 ---
 
@@ -74,28 +77,128 @@ Fractus is a **Continuous Cognitive Agent** — an AI that works like a brain, n
 
 ---
 
-## The 12 Building Blocks
+## Architecture (1.05B total / ~119M active per token)
+
+```
+ContinuousThoughtEngine
+├── d_model=1280, 16 layers, 16 heads
+├── FractalLinearAttention   multi-level causal linear attention (O(L)),
+│                            carry state (S, z) persists across chunks
+├── Kuramoto phase clock     RK4-integrated oscillators → phase vectors
+│                            (learned end-to-end; feeds routing)
+├── PhaseRoutedMoE           128 experts, top-2 active per token,
+│                            von Mises gate over phases, Farey-sequence
+│                            expert phases, load-balance loss in objective
+├── Low-rank experts         W = scale · U@Vᵀ (rank 64) → 64× less compute
+├── Tied embedding/head      GPT-2 BPE vocab (50257)
+└── Persistent thought state residual stream carried across ticks
+```
+
+**Parameter accounting:** ~1.05B total, but only ~118.8M are active per token (dense attention + top-2 of 128 sparse experts) — ~183.1M including the tied embedding. An 11.3% sparsity ratio. This is the basis of the adapted scaling target below.
+
+### The 12 Building Blocks
 
 | Block | What it does |
 |---|---|
 | **Continuous Thought Engine** | The brain — thinks tick by tick through 16 blocks |
-| **Persistent Memory** | Remembers you across sessions, never forgets |
-| **Cognitive Modes** | Shifts mental states (focused, creative, exploratory...) |
+| **Persistent Memory** | Vector bank surviving sessions, cosine recall, 5% blend injection, salience head gates impact |
+| **Cognitive Modes** | Mental states discovered unsupervised (k-means on Kuramoto phase features): focused, creative, exploratory |
 | **RAG Knowledge Base** | Learns facts instantly — no retraining needed |
 | **Cognitive Plugins** | Hot-swappable modes: analyst, coder, creative, teacher |
 | **MetaCognition** | Decides its own actions: retrieve, learn, generate |
-| **Progressive Growth** | Grows from 6M to 1B+ params, palier by palier |
-| **Self-Modification** | Adds new experts at runtime when it needs them |
+| **Progressive Growth** | Grows from 6M to 1B+ params, palier by palier (`maybe_grow`: width + depth + experts) |
+| **Self-Modification** | Adds new experts at runtime when routing is imbalanced (zero-init, placed near the dominant expert) |
 | **PhaseRoutedMoE** | Sparse experts routed by oscillator phases |
 | **Kuramoto Clock** | A dynamical system that drives routing decisions |
 | **Online Trainer** | Learns continuously, one chunk at a time |
-| **HF Space** | Live chat demo with shared memory |
+| **Multimodal `tick_vec`** | Vision patches bypass token embedding (CIFAR "eyes" prototype trained alongside text) |
 
 ---
 
-## Datasets (4.15 Billion Tokens)
+## Live Training Status (August 2026)
 
-Fractus is trained on a massive, diverse corpus available at [huggingface.co/datasets/thefinalboss/fractus-datasets](https://huggingface.co/datasets/thefinalboss/fractus-datasets):
+**Hardware:** 8× RTX 5090 — one independent Python process (one "brain") per GPU, no gradient sync; consolidation via mean-merge.
+
+**Phase 2 (current):**
+- Corpus: **3,439,171,703 tokens** — 8 int32 numpy memory-mapped shards (~430M/GPU)
+- Phase 1 (complete): ~11M tokens on a 1.52B-token `.pt` corpus; weights carried over (no random init)
+- Config: batch 2, seq 128, LR 7e-4, SGD momentum 0.9, bf16, TF32, torch.compile off (VRAM), torch 2.11.0+cu128
+- **Scheduled sampling:** SS_RATE 0.25, SS_PROB 0.2 — ~25% of steps mix ~20% model-generated tokens into inputs to fight exposure bias
+- Loss signals tracked: `tf`/`ema_tf` (teacher-forced CE), `ss`/`ema_ss` (scheduled-sampling CE), `lb` (load balance, stable ~14)
+- Throughput: ~900–1100 tok/s per GPU; a full phase-2 pass ≈ 4–5 days
+
+**Hourly crash-recovery sync:** a daemon uploads all 8 per-GPU checkpoints every hour, mean-merges them into `FRACTUS_1B_8GPU_MERGED.pt`, republishes it under the recovery alias `FRACTUS_1B_STAGE2_MERGED.pt`, and writes a manifest with exact per-GPU token offsets. Any pod death is recoverable to the hour.
+
+**Honest generation state:** teacher-forced loss keeps falling (ema_tf ≈ 1.3–1.8 on the best GPUs), but free-run generation is still non-linguistic — diverse word-salad with repetition loops, better with window-based decoding (~25–28 unique tokens vs ~10–12 chunk-based). This is the documented exposure-bias gap, being closed by scheduled sampling + aligned decoding. Low TF loss does **not** mean the model can speak yet. See [Trusted Loss](#trusted-loss-reading-the-numbers).
+
+### Adapted Chinchilla target
+
+Standard Chinchilla (20 tokens/param) assumes dense transformers where all parameters train on every token. Fractus violates that: only ~119M of 1.05B params are active per token, and the Kuramoto clock trains end-to-end now. The adapted target is **20 × active params ≈ 2.4–3.7B tokens**; with a warm-started checkpoint, the practical target is **~2.5–3B tokens** — which is why the phase-2 corpus is 3.44B. Since Fractus grows continuously (`maybe_grow`), this is an instantaneous cumulative-exposure requirement that grows with the model, not a final-stop condition. Details: [`docs/2026-08-12-fractus-chinchilla.md`](docs/2026-08-12-fractus-chinchilla.md).
+
+---
+
+## The Surgeries (mid-training interventions, no weight wipes)
+
+A defining discovery of this run: **the brain (.pt) and the code are separable.** Bottlenecks were fixed by live surgery — save the checkpoint, patch the code, reload weights, resume at the exact recorded token offset. Multi-day digestion is never thrown away.
+
+| Phase | Intervention | Result |
+|---|---|---|
+| **A — Initial** | Last-position-only CE, 4 independent GPUs | Loss fell; generation collapsed into single-token loops |
+| **B — Routing surgery** | Kuramoto was frozen under `no_grad` (order parameter r ≈ 0.01–0.03); LB loss was detached → ~70% of experts dead. Fixed: gradients enabled (state kept detached for carry), CE + 0.02·lb, gate temp 1.0 → 2.5, omega scale ×4 | lb ≈ 14 live on all GPUs; experts alive |
+| **C — Dense CE** | Replaced last-position CE (1 target / 128 tokens) with CE over all positions | Sharp loss drop; token-to-token chaining enforced |
+| **D — Decode surgery** | Phase/thought noise, frequency penalties, cycle bans, forced escape tokens | Loop lock broken; still no coherent English |
+| **E — Train/gen mismatch** | Training used causal attention + RK4 Kuramoto; generation used a simpler single-tick Euler path. Aligned decode via `generate_aligned.py` | Decode now matches the training path |
+| **F — Loss recalibration** | Cumulative-average CE was misleading near 2.0 → batch CE + EMA; LR 1e-3 → 5e-4 | Trustworthy metrics |
+| **G — Scheduled sampling** | Two-pass training: TF CE + LB, plus SS steps mixing model samples into inputs | The current phase; ss/ema_ss now tracked |
+
+Full logs: [`docs/MASTER_RUN_LOG.md`](docs/MASTER_RUN_LOG.md), [`docs/DISCOVERY_LOG.md`](docs/DISCOVERY_LOG.md), [`docs/OPERABILITY_MIDTRAIN.md`](docs/OPERABILITY_MIDTRAIN.md).
+
+### Composable checkpoints
+
+Because shapes stay compatible and manifests record token offsets, the following operations are proven on this run:
+- **Parallel independent training** — N GPUs on separate shards
+- **Mean-merge** — per-GPU checkpoints averaged into one unified model that still generates (424/440 tensors on the 4-GPU merge; stateful buffers reset)
+- **Iterative fusion** — train → merge → train cycles; the model absorbs compatible checkpoints and keeps going
+- **Exact-token resume** — across pod reboots and driver crashes
+- **Compositional growth ≠ structural growth** — weight averaging vs `maybe_grow` paliers
+
+Details: [`docs/COMPOSABILITY_AND_SURGERY.md`](docs/COMPOSABILITY_AND_SURGERY.md).
+
+---
+
+## Trusted Loss (reading the numbers)
+
+Three metrics, three different questions:
+
+| Metric | What it measures | Where |
+|---|---|---|
+| `ema_tf` | CE with ground-truth history + continuous internal state — is the model digesting data? | live |
+| `ema_ss` | CE after scheduled sampling mixes model-generated tokens in — partial free-run robustness | live |
+| **AR** | Warm on 32 true tokens, greedily free-run 32 steps, CE vs truth — actual generation quality | offline |
+
+**A single CE number cannot represent both teacher-forced learning and free-run generation.** Live ema_tf ≈ 1.3–1.4 coexists with AR ≈ 2240 (random guessing over the GPT-2 vocab is ~10.82): free-running compounds every error, and teacher forcing always supplies the correct past. Trust `ema_tf`/`ema_ss` for learning progress, AR + text probes for generation progress. The convergence signal is AR falling toward the ss/tf order of magnitude, plus readable output. Details: [`docs/TRUSTED_LOSS.md`](docs/TRUSTED_LOSS.md).
+
+---
+
+## Research Results (Honest)
+
+**Refuted:**
+- **EDT** (Expert Decoupled Training) — all 5 variants ~19–20% worse than from-scratch; MSE objective misaligned with CE, router ignores half the experts.
+- **Forward-Forward** (Hinton 2022) — NLL rose from 124 to 221; local objectives can't replace global backprop here.
+
+**Validated:**
+- **Progressive growth** — warm start converges faster; trained through palier 3 (350M, loss 23.0, ~5 days CPU).
+- **Sparse low-rank MoE** — 2/128 experts = 64× less compute.
+- **Open-heart operability** — live surgery on a training model works (see above).
+- **Routing pathology as a first-class debug target** — expert-hit histograms and the Kuramoto order parameter catch failures that loss curves hide (they caught the frozen clock and the dead experts).
+
+**Training optimizations (measured):** tied head (~1.1×), head-partial training (~2×), sparse gathered low-rank MoE (8× at 16 experts, 64× at 128), detached-state Kuramoto, gradient accumulation (~1.4×), SGD+momentum over AdamW (~1.37×), batching (335 → 1345 tok/s at B=8), bf16 (~2×). Combined CPU: ~336× over naive. Measured on CPU: 707 tok/s single-stream, **1345 tok/s batched**.
+
+---
+
+## Datasets (4.2 Billion Tokens)
+
+Source of truth: [huggingface.co/datasets/thefinalboss/fractus-datasets](https://huggingface.co/datasets/thefinalboss/fractus-datasets).
 
 | Dataset | Tokens | Content |
 |---|---|---|
@@ -106,18 +209,18 @@ Fractus is trained on a massive, diverse corpus available at [huggingface.co/dat
 | **paradigms-full** | **191M** | 140 paradigms (neuroscience, CS, architecture) |
 | **gutenberg-esoteric** | **~58M** | 487 public-domain esoteric / masonic / hermetic books |
 | **neuro-arch-full** | **86M** | 60 neuroscience paradigms (neuro-software-architecture) |
-| **all-github-repos** | **54M+** | 80+ of your GitHub repos (public + private, secret-filtered) |
+| **all-github-repos** | **54M+** | 80+ repos (public + private, secret-filtered) |
 | **mega-corpus-v3** | **20M** | Literature, philosophy, occult, masonry, science, medicine |
 | **wordnet** | **3M** | 117K dictionary synset entries |
 | **Total** | **~4.2B** | |
 
-The corpus covers neuroscience, software architecture, philosophy, psychology, literature, esoteric traditions, programming, medicine, and Fractus's own source code.
+Tokenized streams: Phase 1 = ~1.52B tokens (`.pt` files); Phase 2 = ~3.44B tokens (8 GPT-2 BPE int32 memmap shards). Phases are kept separate to avoid re-ingesting the same ordered stream.
 
 ---
 
 ## Applied Neuroscience — the theoretical core
 
-Fractus is a neuroscience-grounded architecture: real brain mechanisms are mapped to software/AI patterns, and that mapping is itself training data. Every entry below is present in the dataset (`neuro_paradigms_1b/`, `neuro_code_math/applied_neuroscience/`, and the `*.pt` files in `datasets/`) — verified by file listing, not just claimed.
+Fractus is a neuroscience-grounded architecture: real brain mechanisms are mapped to software/AI patterns, and that mapping is itself training data. Every entry below is present in the dataset — verified by file listing, not just claimed.
 
 ### 100 neuroscience → software-architecture paradigms (`neuro_paradigms_1b`, 300 chunked files)
 
@@ -156,7 +259,7 @@ radial_glial_scaffold               raphe_serotonin_rate_limit        rem_parado
 replay_consolidation_trajectory     reticular_activating_system       retinotopic_data_layout
 satellite_glial_ganglion            schwann_cell_peripheral_repair    sleep_pressure_forced_maintenance
 sleep_spindle_memory_transfer       slow_oscillation_sync             subplate_wait_state
-suprachiasmatic_clock               synaptic_vesicle_pool             synaptogenesis_service_wiring
+suprachiasmatic_clock               synaptic_vesicle_pool            synaptogenesis_service_wiring
 tanycyte_metabolic_sensor           temporal_pole_semantic_cache      thalamocortical_loop_api
 tonotopic_stream_partitioning       vasopressin_loyalty_aware_routing vta_dopamine_rpe_scheduler
 wernicke_area_api_parser
@@ -175,8 +278,8 @@ cerebellar_computation    consolidation              cortical_minicolumns       
 dendritic_computation     dopamine_reward            entorhinal_grid_cells      free_energy_principle
 gamma_oscillations        global_workspace_theory    head_direction_cells       hierarchical_processing
 higher_order_theories     hippocampal_formation      homeostatic_plasticity     integrated_information_theory
-long_term_depression      long_term_potentiation     metaplasticity             neural_coding
-neural_decoding           neural_manifolds           neuromodulation            place_cells
+long_term_depression      long_term_potentiation    metaplasticity             neural_coding
+neural_decoding           neural_manifolds          neuromodulation            place_cells
 population_coding         predictive_coding          predictive_processing      rate_coding
 serotonin_modulation      sharp_wave_ripples         sleep_replay               sparse_coding
 spike_timing_dependent_plasticity   temporal_coding  thalamic_reticular_nucleus theta_oscillations
@@ -186,17 +289,6 @@ spike_timing_dependent_plasticity   temporal_coding  thalamic_reticular_nucleus 
 ### Foundational researchers & concepts honored in the corpus
 
 **Hebb** (Hebbian learning), **Bi & Poo** (STDP timing curves), **Friston** (free energy / active inference), **Buzsáki** (hippocampal sharp-wave ripples, replay), **Moser & Moser** (grid cells), **Hodgkin & Huxley** (axon dynamics), **Izhikevich** (spike models), **Tononi** (integrated information), **Baars/Dehaene** (global workspace), **O'Keefe** (place cells), **Kandel** (memory consolidation), plus neuromodulators (dopamine RPE, serotonin, oxytocin, vasopressin) and glial biology (astrocytes, microglia, oligodendrocytes, Schwann cells).
-
-### Source files (all verified present)
-
-| File | Content |
-|---|---|
-| `neuro_paradigms_1b/*.jsonl.gz` (300) | 100 paradigms × 3 chunks, instruction+response+citations |
-| `neuro_code_math/applied_neuroscience__*.jsonl` (40) | Computational neuroscience deep-dives |
-| `datasets/neuro_arch_full.pt` | 60 neuroscience-grounded architecture paradigms |
-| `datasets/neuro_software_architecture.pt` | Same family, alternate cut |
-| `datasets/paradigms_full.pt` / `paradigms_dataset.pt` | 140 foundational + neuroscience paradigms |
-| `datasets/fractus_generated_corpus.pt` | Fractus ontology engine (neuroscience → AI) |
 
 ---
 
@@ -214,7 +306,6 @@ pip install torch numpy tokenizers matplotlib fastapi uvicorn pydantic
 
 ```bash
 pytest tests/ -q
-# → 28 passed
 ```
 
 ### Train on CPU (progressive growth)
@@ -223,15 +314,12 @@ pytest tests/ -q
 python scripts/train_progressive.py --paliers 0,1,2,3 --accumulation-steps 8
 ```
 
-### Train on GPU (1B scale)
+### Train the 1B (GPU, sharded)
 
 ```bash
-python scripts/train_1b_gpu.py \
-    --checkpoint checkpoints/fractus_palier3.pt \
-    --tokens 500000000 \
-    --batch-size 8 \
-    --bf16 \
-    --accumulation-steps 4
+# Build shards, then one process per GPU
+python scripts/shard_corpus.py --corpus data/training_corpus.pt --out data/shard_gpu
+bash scripts/launch_4gpu.sh        # pattern scales to 8
 ```
 
 ### Use the agent
@@ -267,37 +355,36 @@ print(f"Confidence: {confidence.item():.2f}")
 | Palier 1 | 25M | 2 | 8 | Simple text generation |
 | Palier 2 | 120M | 4 | 16 | Coherent fragments |
 | Palier 3 | 350M | 8 | 32 | Decent text quality |
-| **Palier 4** | **1B** | **16** | **128** | **Full language model** |
+| **Palier 4** | **1B** | **16** | **128** | **Full language model (training now)** |
 
-Each stage inherits the previous one's knowledge. The model never starts from zero.
+Each stage inherits the previous one's knowledge via zero-padded warm starts. The model never starts from zero.
 
 ---
 
-## Architecture (for developers)
+## Repository Layout
 
 ```
 fractus-cte/
 ├── fractus/
 │   ├── continuous_engine.py      ← The brain (CTE + CTEBlock)
-│   │   ├── CTEBlock              One block: attention + Kuramoto + MoE
-│   │   └── ContinuousThoughtEngine  Stacks N blocks, carries thought state
 │   ├── memory.py                 ← Cross-session persistent memory
 │   ├── cognitive_modes.py        ← Unsupervised mental state detection
-│   ├── grow.py                   ← Progressive growth operator (width + depth + experts)
+│   ├── grow.py                   ← Progressive growth (width + depth + experts)
 │   ├── rag.py                    ← Knowledge base + plugins + metacognition
 │   ├── tokenizer.py              ← GPT-2 BPE tokenizer
 │   ├── nn/
-│   │   ├── moe.py                ← PhaseRoutedMoE (sparse, low-rank, differentiable)
-│   │   ├── attention.py          ← Multi-level causal linear attention
+│   │   ├── moe.py                ← PhaseRoutedMoE (sparse, low-rank)
+│   │   ├── attention.py          ← Multi-level causal linear attention + carry
 │   │   ├── phase_ode.py          ← Kuramoto RK4 oscillators
 │   │   └── lazy_siren.py         ← Low-rank weight storage
-│   └── train/
-│       └── online.py             ← Online trainer (SGD/AdamW, accumulation)
-├── tests/                        28 tests
-├── scripts/                      Training + corpus + GPU scripts
+│   └── train/online.py           ← Online trainer
+├── tests/
+├── scripts/                      fast_tokenize, shard_corpus, launch_4gpu,
+│                                 fast4gpu_boost, generate_aligned, hourly_hf_sync
+├── checkpoints/                  per-GPU + merged + recovery alias
+├── docs/                         run logs, surgeries, trusted loss, scaling
 ├── space/                        HF Space demo
-├── docs/                         Optimization analysis
-├── Fractus_White_Paper.pdf       Technical white paper v2.0
+├── Fractus_White_Paper_v2.md     White paper v2.0
 └── arxiv/                        LaTeX source for arXiv submission
 ```
 
@@ -311,19 +398,20 @@ fractus-cte/
 
 **Chunk**: 32 tokens processed in one forward pass. The thought state and per-block attention state carry between chunks.
 
-**Expert**: a small neural network (low-rank `W = scale·U@V^T`) that specializes in certain thoughts. Only 2 of 128 active per token (sparse routing).
+**Expert**: a small low-rank network (`W = scale·U@Vᵀ`) that specializes in certain thoughts. Only 2 of 128 active per token.
 
-**Kuramoto**: coupled oscillators producing phase vectors that route tokens to experts. The engine's "internal clock."
+**Kuramoto clock**: coupled oscillators producing phase vectors that route tokens to experts — learned end-to-end since the routing surgery.
+
+**Surgery**: patching code around a preserved checkpoint mid-training, resuming at the exact token offset. Weights are never wiped for a routing, objective, or decode bug.
 
 ---
 
-## Research Results (Honest)
+## Limitations (stated plainly)
 
-- **EDT** (Expert Decoupled Training): refuted. 5 variants, all ~19% worse.
-- **Forward-Forward** (Hinton 2022): refuted. Local learning can't replace global backprop.
-- **Progressive growth**: works. Warm start converges faster.
-- **Sparse MoE low-rank**: works. 2/128 experts = 64x less compute.
-- **1345 tok/s on CPU**: measured (batch=8 + SGD + all optimizations).
+- Generation is not yet coherent English — word-level repetition loops / lexical noise. Exposure bias is being addressed by scheduled sampling; AR is the metric to watch.
+- GPT-2 vocab dominates parameters (81% at d=768) — vocab reduction is a known lever.
+- "Remembers forever" and "grows on its own" describe the architecture's design; no independent benchmarks are provided.
+- This is a research artifact and a live training run, not a production assistant.
 
 ---
 
@@ -340,5 +428,6 @@ MIT. Fractus belongs to you, not to a corporation.
 - **GitHub:** [github.com/AFKmoney/fractus-cte](https://github.com/AFKmoney/fractus-cte)
 - **HuggingFace Model:** [huggingface.co/thefinalboss/fractus-cte](https://huggingface.co/thefinalboss/fractus-cte)
 - **HuggingFace Datasets:** [huggingface.co/datasets/thefinalboss/fractus-datasets](https://huggingface.co/datasets/thefinalboss/fractus-datasets)
-- **White Paper:** [Fractus_White_Paper.pdf](Fractus_White_Paper.pdf)
+- **White Paper:** [Fractus_White_Paper_v2.md](Fractus_White_Paper_v2.md) / [PDF](Fractus_White_Paper.pdf)
+- **Run logs:** [MASTER_RUN_LOG](docs/MASTER_RUN_LOG.md) · [TRAINING_LOG_1B](docs/TRAINING_LOG_1B.md) · [DISCOVERY_LOG](docs/DISCOVERY_LOG.md)
 - **arXiv source:** [arxiv/main.tex](arxiv/main.tex)
